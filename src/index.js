@@ -33,6 +33,14 @@ async function handleApi(request, env, url) {
   const path = url.pathname;
   const method = request.method;
 
+  // 合言葉がCloudflare側にまだ設定されていない場合は、それが分かるように伝える
+  if (!env.ADMIN_KEY) {
+    return json(
+      { error: "サーバーに合言葉（ADMIN_KEY）が設定されていません。Cloudflareの設定を確認してください" },
+      503
+    );
+  }
+
   // ---- スタッフ向け（合言葉が必要） ----
   if (path === "/api/staff" && method === "GET") {
     if (!checkKey(request, env, "staff")) return unauthorized();

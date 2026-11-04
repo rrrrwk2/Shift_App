@@ -73,7 +73,7 @@ async function start() {
       accessKey = "";
       showKeySection(err.message);
     } else {
-      showKeySection("読み込みに失敗しました。通信状態を確認してください。");
+      showKeySection(`読み込みに失敗しました：${err.message}`);
     }
   }
 }

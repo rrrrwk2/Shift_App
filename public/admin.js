@@ -76,6 +76,9 @@ function handleError(err) {
     clearKey(ADMIN_KEY_NAME);
     adminKey = "";
     showKeySection(err.message);
+  } else if (els.content.hidden) {
+    // まだ一覧を表示していない段階のエラーは、合言葉の欄の下に出す
+    showKeySection(err.message);
   } else {
     els.summary.textContent = err.message;
   }
