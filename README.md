@@ -45,8 +45,48 @@
 - **データはリポジトリに入れない**：スタッフの名前・希望・シフトなどはデータベース側に置く
 - **秘密情報はコミットしない**：LINEのアクセストークンやAPIキーは環境変数などで管理する
 
-## 技術構成（予定）
+## 技術構成
 
-- 提出の入口：LINE公式アカウント（無料プラン）＋ LINEミニアプリ
-- 画面：JavaScript
-- データベース・公開先：無料枠のあるサービスから選定中
+- 画面：HTML / CSS / JavaScript（フレームワークなし）
+- サーバー処理：Cloudflare Workers
+- データベース：Cloudflare D1（SQLite）
+- 公開：GitHubにpushするとCloudflareが自動で公開（Workers Builds）
+- 提出の入口（予定）：LINE公式アカウント（無料プラン）＋ LINEミニアプリ
+
+LINEとつなぐまでの間は、合言葉（スタッフ用・作成担当用）を知っている人だけが使えるようにしています。
+
+## ファイル構成
+
+```
+public/            画面（Cloudflareがそのまま配信する）
+  index.html       シフト希望の提出画面（スタッフ用）
+  submit.js        提出画面の動き
+  admin.html       シフト希望の一覧画面（作成担当用）／ URLは /admin
+  admin.js         一覧画面の動き
+  common.js        両方の画面で使う共通処理
+  style.css        見た目
+src/index.js       サーバー処理（/api/〜 へのリクエストを受けてデータベースを読み書きする）
+migrations/        データベースのテーブル定義（SQL）
+wrangler.jsonc     Cloudflareの設定
+```
+
+## セットアップ（Cloudflare）
+
+1. **データベースを作る**：ダッシュボードの「ストレージとデータベース」→「D1」→ 名前 `shift-app-db` で作成
+2. **テーブルを作る**：作ったデータベースの「コンソール」に `migrations/0001_init.sql` の中身を貼り付けて実行
+3. **IDを設定する**：データベースのIDを `wrangler.jsonc` の `database_id` に書く
+4. **GitHubとつなぐ**：「Workers & Pages」→「アプリケーションを作成」→ GitHub → このリポジトリを選び、名前を `shift-app` にしてデプロイ
+5. **合言葉を設定する**：作成したWorkerの「設定」→「変数とシークレット」に、種類「シークレット」で次の2つを追加
+   - `ACCESS_KEY`：スタッフ用の合言葉
+   - `ADMIN_KEY`：作成担当用の合言葉
+6. `https://shift-app.<サブドメイン>.workers.dev/` が提出画面、`/admin` が一覧画面
+
+## 手元で動かす場合
+
+```
+npm install
+echo "ACCESS_KEY=test-staff" > .dev.vars
+echo "ADMIN_KEY=test-admin" >> .dev.vars
+npm run db:init:local
+npm run dev
+```

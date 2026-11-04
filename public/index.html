@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>シフト希望の提出</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header>
+      <h1>シフト希望の提出</h1>
+      <p>入れる日をタップして、送信してください。何度でも出し直せます。</p>
+    </header>
+
+    <main>
+      <!-- 合言葉の入力（最初の1回だけ） -->
+      <section id="key-section" class="card" hidden>
+        <h2>合言葉</h2>
+        <p class="hint">お店で共有されている合言葉を入力してください。</p>
+        <div class="row">
+          <input id="key-input" type="password" autocomplete="off" />
+          <button id="key-button" type="button" style="flex: 0 0 auto">OK</button>
+        </div>
+        <div id="key-message" class="message error"></div>
+      </section>
+
+      <!-- 提出フォーム -->
+      <form id="form" hidden>
+        <section class="card">
+          <label for="staff-select">名前</label>
+          <select id="staff-select"></select>
+          <div style="height: 12px"></div>
+          <label for="period-select">対象の月</label>
+          <select id="period-select"></select>
+        </section>
+
+        <section class="card">
+          <h2>基本の時間</h2>
+          <p class="hint">日ごとに時間を書かなかった日は、この時間で入れる扱いになります。終わりは空欄ならラストまで。</p>
+          <div class="row">
+            <input id="default-start" type="time" value="17:00" aria-label="開始" />
+            <span class="sep">〜</span>
+            <input id="default-end" type="time" aria-label="終了" />
+          </div>
+        </section>
+
+        <section class="card">
+          <h2>入れる日</h2>
+          <p class="hint">タップするたびに「○（入れる）→ △（相談可）→ 空欄」と切り替わります。</p>
+          <div id="calendar" class="calendar"></div>
+        </section>
+
+        <section class="card" id="day-list-card" hidden>
+          <h2>日ごとの時間（変えたい日だけ）</h2>
+          <p class="hint">空欄の日は基本の時間になります。</p>
+          <ul id="day-list" class="day-list"></ul>
+        </section>
+
+        <section class="card">
+          <h2>週に入りたい日数</h2>
+          <div class="row">
+            <select id="min-days" aria-label="週の最低日数"></select>
+            <span class="sep">〜</span>
+            <select id="max-days" aria-label="週の最大日数"></select>
+          </div>
+        </section>
+
+        <section class="card">
+          <label for="note">備考（任意）</label>
+          <textarea id="note" maxlength="500" placeholder="例：テスト期間の12/10〜12/14は早上がり希望"></textarea>
+        </section>
+
+        <button id="submit-button" class="primary" type="submit">この内容で送信する</button>
+        <div id="form-message" class="message"></div>
+      </form>
+    </main>
+
+    <script src="common.js"></script>
+    <script src="submit.js"></script>
+  </body>
+</html>

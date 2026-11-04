@@ -1,0 +1,14 @@
+{
+  "name": "shift-app",
+  "version": "0.1.0",
+  "private": true,
+  "description": "アルバイトのシフト希望の提出・シフト作成・公開をオンラインで行うアプリ",
+  "scripts": {
+    "dev": "wrangler dev",
+    "db:init:local": "wrangler d1 execute shift-app-db --local --file=./migrations/0001_init.sql",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^4.157.0"
+  }
+}

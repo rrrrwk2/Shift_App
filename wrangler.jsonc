@@ -1,0 +1,32 @@
+// Cloudflare（wrangler）の設定ファイル
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+
+  // Cloudflare上でのアプリ名。ダッシュボードで作るWorkerの名前と同じにする
+  "name": "shift-app",
+
+  // サーバー処理の入口になるファイル
+  "main": "src/index.js",
+  "compatibility_date": "2026-10-01",
+
+  // 画面のファイル（HTML/CSS/JS）が入っているフォルダ
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS"
+  },
+
+  // データベース（D1）。コードの中では env.DB で使える
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "shift-app-db",
+      // Cloudflareで作ったデータベースのID（秘密情報ではないのでここに書いてOK）
+      "database_id": "00000000-0000-0000-0000-000000000000"
+    }
+  ],
+
+  // Cloudflareのダッシュボードでログを見られるようにする
+  "observability": {
+    "enabled": true
+  }
+}

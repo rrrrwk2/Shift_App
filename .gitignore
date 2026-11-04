@@ -12,6 +12,8 @@ out/
 .env
 .env.*
 !.env.example
+.dev.vars
+.dev.vars.*
 
 # ログ
 npm-debug.log*
