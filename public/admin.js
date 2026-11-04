@@ -22,6 +22,10 @@ const els = {
   remindHint: $("remind-hint"),
   remindLog: $("remind-log"),
   remindButton: $("remind-button"),
+  unsubmittedTitle: $("unsubmitted-title"),
+  unsubmittedList: $("unsubmitted-list"),
+  checkAllLabel: $("check-all-label"),
+  checkAll: $("check-all"),
   remindMessage: $("remind-message"),
   requestsCard: $("requests-card"),
   requestsTitle: $("requests-title"),
@@ -41,6 +45,10 @@ async function init() {
   els.reloadButton.addEventListener("click", load);
   els.staffAdd.addEventListener("click", onAddStaff);
   els.remindButton.addEventListener("click", onRemindNow);
+  els.checkAll.addEventListener("change", () => {
+    for (const box of checkableBoxes()) box.checked = els.checkAll.checked;
+    updateRemindButton();
+  });
   els.staffName.addEventListener("keydown", (e) => {
     if (e.key === "Enter") onAddStaff();
   });
@@ -187,11 +195,11 @@ function weeklyText(sub) {
 // ---------------------------------------------------------
 const REMIND_LABELS = { "3days": "自動（3日前）", "1day": "自動（前日）", manual: "手動" };
 
-function renderReminders(data) {
-  // まだ提出していない、LINE連携済みの人数（今すぐ送ったときに届く人数）
-  const submitted = new Set(data.submissions.map((s) => s.staff_id));
-  const targets = data.staff.filter((p) => p.linked && !submitted.has(p.id)).length;
+// 送れる状態か（設定済み・締切前）を覚えておく
+let remindAvailable = false;
 
+function renderReminders(data) {
+  // ---- 送信記録 ----
   els.remindLog.innerHTML = data.reminders.length
     ? data.reminders
         .map(
@@ -203,35 +211,87 @@ function renderReminders(data) {
         .join("")
     : "<li class='hint' style='margin:0'>この月はまだ送っていません</li>";
 
-  const open = data.period_info.open;
-  els.remindButton.textContent = `未提出の${targets}人に今すぐ送る`;
-  els.remindButton.disabled = !open || !data.reminder_ready || targets === 0;
-  els.remindButton.dataset.targets = targets;
+  // ---- 未提出の人の一覧（チェックを付けて送る） ----
+  const submitted = new Set(data.submissions.map((s) => s.staff_id));
+  const unsubmitted = data.staff.filter((p) => !submitted.has(p.id));
+  remindAvailable = data.period_info.open && data.reminder_ready;
+
+  els.unsubmittedTitle.textContent = `未提出の人（${unsubmitted.length}人）`;
+  els.unsubmittedList.innerHTML = "";
+  if (unsubmitted.length === 0) {
+    els.unsubmittedList.innerHTML = "<li class='hint' style='margin:0'>全員提出済みです</li>";
+  }
+  for (const person of unsubmitted) {
+    const li = document.createElement("li");
+    const label = document.createElement("label");
+    label.className = "check-row";
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.value = person.id;
+    // LINE連携していない人には送れないので、チェックできないようにする
+    box.disabled = !person.linked || !remindAvailable;
+    box.addEventListener("change", updateRemindButton);
+    const name = document.createElement("span");
+    name.textContent = person.name;
+    label.append(box, name);
+    if (!person.linked) {
+      const note = document.createElement("span");
+      note.className = "hint";
+      note.style.margin = "0";
+      note.textContent = "（LINE未連携のため送れません）";
+      label.append(note);
+    }
+    li.append(label);
+    els.unsubmittedList.append(li);
+  }
+
+  els.checkAll.checked = false;
+  els.checkAllLabel.hidden = checkableBoxes().length === 0;
+  updateRemindButton();
 
   if (!data.reminder_ready) {
     setRemindMessage("LINEで送るための設定（LINE_MESSAGING_TOKEN）がまだのため、送信できません", "error");
-  } else if (!open) {
+  } else if (!data.period_info.open) {
     setRemindMessage("この月は締め切り済みです");
   } else {
     setRemindMessage("");
   }
 }
 
+// チェックできる（＝送れる）チェックボックス
+function checkableBoxes() {
+  return [...els.unsubmittedList.querySelectorAll("input[type=checkbox]:not(:disabled)")];
+}
+
+// チェックした人数に合わせてボタンの表示を変える
+function updateRemindButton() {
+  const count = checkableBoxes().filter((b) => b.checked).length;
+  els.remindButton.textContent = count ? `選んだ${count}人に送る` : "選んだ人に送る";
+  els.remindButton.disabled = !remindAvailable || count === 0;
+}
+
 async function onRemindNow() {
   const period = els.periodSelect.value;
-  const targets = els.remindButton.dataset.targets;
-  if (!confirm(`${formatPeriod(period)}分をまだ提出していない${targets}人に、LINEで提出のお願いを送ります。よろしいですか？`)) {
+  const staffIds = checkableBoxes()
+    .filter((b) => b.checked)
+    .map((b) => Number(b.value));
+  if (staffIds.length === 0) return;
+  if (!confirm(`選んだ${staffIds.length}人に、LINEで${formatPeriod(period)}分の提出のお願いを送ります。よろしいですか？`)) {
     return;
   }
   els.remindButton.disabled = true;
   try {
-    const res = await api("/api/admin/remind", { method: "POST", body: { period }, key: adminKey });
+    const res = await api("/api/admin/remind", {
+      method: "POST",
+      body: { period, staff_ids: staffIds },
+      key: adminKey,
+    });
     await load();
     setRemindMessage(`${res.recipients}人に送りました`, "success");
   } catch (err) {
     if (err instanceof AuthError) handleError(err);
     else setRemindMessage(err.message, "error");
-    els.remindButton.disabled = false;
+    updateRemindButton();
   }
 }
 
