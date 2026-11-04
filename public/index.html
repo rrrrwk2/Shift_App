@@ -21,11 +21,31 @@
 
       <!-- 最初の1回だけ：自分の名前を選ぶ -->
       <section id="link-section" class="card" hidden>
-        <h2>はじめに、あなたの名前を選んでください</h2>
+        <h2>はじめに登録してください</h2>
         <p class="hint" id="link-hint"></p>
-        <select id="link-select"></select>
-        <div style="height: 12px"></div>
-        <button id="link-button" type="button" class="primary">この名前で登録する</button>
+        <label for="link-code">招待コード（作成担当から届いた8けたのコード）</label>
+        <input id="link-code" class="code-input" type="text" autocomplete="off" autocapitalize="characters"
+               spellcheck="false" maxlength="9" placeholder="例：K7P2-QX9M" />
+
+        <!-- 個人情報の取り扱い（登録の前に必ず読んでもらう） -->
+        <div class="privacy-notice">
+          <strong>個人情報の取り扱いについて</strong>
+          <dl style="margin-top: 8px">
+            <dt>集めるもの</dt>
+            <dd>名前、LINEの表示名と利用者ID、シフトの希望・備考、変更の申請、決まったシフト</dd>
+            <dt>使い道</dt>
+            <dd>シフトを作ること、シフトや提出のお願いをLINEで知らせることだけに使います</dd>
+            <dt>見られる人</dt>
+            <dd>シフトの作成担当と店長など、登録された管理者だけ（決まったシフトは、スタッフ全員が見られます）</dd>
+            <dt>保存期間</dt>
+            <dd>6か月より前の月の分は自動で削除します。辞めたときや、消してほしいときは作成担当に伝えてください</dd>
+          </dl>
+        </div>
+        <label class="check-row" style="margin-bottom: 12px">
+          <input id="link-consent" type="checkbox" />
+          <span>上の内容に同意します</span>
+        </label>
+        <button id="link-button" type="button" class="primary">登録する</button>
         <div id="link-message" class="message error"></div>
       </section>
 

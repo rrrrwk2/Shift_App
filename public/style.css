@@ -1037,3 +1037,78 @@ table.view-grid tr.me-row td.on {
   background: var(--accent);
   color: var(--accent-text);
 }
+
+/* =========================================================
+   ログイン・招待コード
+   ========================================================= */
+.admin-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.admin-top .admin-nav {
+  margin-bottom: 0;
+}
+
+.user-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.user-bar button {
+  padding: 4px 10px;
+  font-size: 0.8rem;
+}
+
+.code-value {
+  margin: 8px 0;
+  font-size: 1.8rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-align: center;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+
+.cell-dialog textarea {
+  min-height: 110px;
+  font-size: 0.85rem;
+}
+
+/* スタッフの初回登録：個人情報の扱いのお知らせ */
+.privacy-notice {
+  font-size: 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin: 10px 0;
+  background: var(--bg);
+}
+
+.privacy-notice dl {
+  display: grid;
+  grid-template-columns: 6.5em 1fr;
+  gap: 4px 8px;
+  margin: 0;
+}
+
+.privacy-notice dt {
+  color: var(--muted);
+}
+
+.privacy-notice dd {
+  margin: 0;
+}
+
+.code-input {
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 1.2rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}

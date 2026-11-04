@@ -8,21 +8,17 @@
   </head>
   <body>
     <header style="max-width: 1200px">
-      <nav class="admin-nav"><a href="/admin" aria-current="page">希望の一覧</a><a href="/shift">シフト作成</a></nav>
+      <div class="admin-top">
+        <nav class="admin-nav"><a href="/admin" aria-current="page">希望の一覧</a><a href="/shift">シフト作成</a></nav>
+        <div id="user-bar" class="user-bar"></div>
+      </div>
       <h1>シフト希望の一覧</h1>
       <p>作成担当用の画面。</p>
     </header>
 
     <main class="wide">
-      <!-- 管理用の合言葉 -->
-      <section id="key-section" class="card" hidden style="max-width: 480px">
-        <h2>管理用の合言葉</h2>
-        <div class="row">
-          <input id="key-input" type="password" autocomplete="off" />
-          <button id="key-button" type="button" style="flex: 0 0 auto">OK</button>
-        </div>
-        <div id="key-message" class="message error"></div>
-      </section>
+      <!-- ログイン（LINE）・管理者の登録（admin-auth.js が中身を作る） -->
+      <section id="auth-section" class="card" style="max-width: 520px"></section>
 
       <div id="content" hidden>
         <section class="card">
@@ -102,7 +98,7 @@
 
         <section class="card" style="margin-top: 20px; max-width: 480px">
           <h2>スタッフの登録・並び順</h2>
-          <p class="hint">ここで登録した名前が、スタッフがLINEで初めて開いたときの選択肢に出る。一度選ばれた名前はそのLINEアカウント専用になる。</p>
+          <p class="hint">名前を登録したら「招待コード」を発行して、本人にだけ個別のトークで送る。スタッフはLINEで初めて開いたときにそのコードを入れて登録する（コードは7日間・1回だけ有効）。</p>
           <p class="hint">名前の左の「⋮⋮」をドラッグすると並び順を変えられる（一覧表の行の順番も変わる）。</p>
           <p class="hint">性別とレベルは日ごとの人数を数えるためのもの。この画面でだけ見られて、スタッフ側には出ない。</p>
           <div class="row">
@@ -112,13 +108,36 @@
           <div id="staff-message" class="message"></div>
           <ul id="staff-list" class="staff-list"></ul>
         </section>
+        <section class="card" style="margin-top: 20px; max-width: 480px">
+          <h2>管理者（この画面に入れる人）</h2>
+          <p class="hint">管理者は全員の希望・性別・レベル・シフトを見られる。必要な人だけにして、辞めた人はすぐ外す。</p>
+          <ul id="admin-list" class="staff-list"></ul>
+          <button id="admin-invite" type="button" style="margin-top: 10px">管理者の招待コードを発行</button>
+          <div id="admin-message" class="message"></div>
+        </section>
       </div>
     </main>
 
-    <!-- ドラッグで並び替えるための部品（SortableJS） -->
-    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.7/Sortable.min.js"></script>
+    <!-- 招待コードを表示する小さい画面 -->
+    <dialog id="code-dialog" class="cell-dialog">
+      <h2 id="code-title"></h2>
+      <p class="code-value" id="code-value"></p>
+      <p class="hint">このコードはこの画面でしか表示されない。下の文章をコピーして、本人にだけ個別のトークで送る。</p>
+      <textarea id="code-message" readonly rows="5"></textarea>
+      <div class="dialog-buttons">
+        <button id="code-copy" type="button" class="primary">文章をコピー</button>
+        <button id="code-close" type="button">閉じる</button>
+      </div>
+      <div id="code-copy-result" class="message success"></div>
+    </dialog>
+
+    <!-- ドラッグで並び替えるための部品（SortableJS 1.15.7, MITライセンス）。外部から読み込まず、このアプリに同梱している -->
+    <script src="vendor/Sortable.min.js"></script>
+    <!-- LINEでのログインに使うLINEの部品 -->
+    <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
     <script src="common.js"></script>
     <script src="rules.js"></script>
+    <script src="admin-auth.js"></script>
     <script src="admin.js"></script>
   </body>
 </html>
