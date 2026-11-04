@@ -4,7 +4,7 @@
 
 /* 色やサイズは最初にまとめて決めておく（あとで変えやすいように） */
 :root {
-  --bg: #7d88ac;
+  --bg: #ffffff;
   --card: #ffffff;
   --text: #1f2328;
   --muted: #acb3c0;
