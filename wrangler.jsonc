@@ -21,7 +21,7 @@
       "binding": "DB",
       "database_name": "shift-app-db",
       // Cloudflareで作ったデータベースのID（秘密情報ではないのでここに書いてOK）
-      "database_id": "00000000-0000-0000-0000-000000000000"
+      "database_id": "da489509-6abb-47ab-95e3-df9a0addc66a"
     }
   ],
 
