@@ -570,3 +570,27 @@ table.grid td.note {
   width: 18px;
   height: 18px;
 }
+
+/* ---------- 並び替え（ドラッグ） ---------- */
+.staff-list li {
+  gap: 10px;
+}
+
+.staff-list li > div:nth-child(2) {
+  flex: 1;
+}
+
+.drag-handle {
+  cursor: grab;
+  color: var(--muted);
+  font-size: 1.1rem;
+  line-height: 1;
+  padding: 8px 4px;
+  touch-action: none; /* スマホで指で動かしたときに画面がスクロールしないように */
+  user-select: none;
+}
+
+/* ドラッグ中に元の場所に残る影 */
+.sortable-ghost {
+  opacity: 0.4;
+}

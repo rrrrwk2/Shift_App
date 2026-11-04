@@ -80,6 +80,9 @@ async function handleApi(request, env, url) {
     if (path === "/api/admin/staff/deactivate" && method === "POST") {
       return deactivateStaff(env, await readJson(request));
     }
+    if (path === "/api/admin/staff/order" && method === "POST") {
+      return saveStaffOrder(env, await readJson(request));
+    }
     if (path === "/api/admin/staff/unlink" && method === "POST") {
       return unlinkStaff(env, await readJson(request));
     }
@@ -180,7 +183,7 @@ async function getMe(env, lineUser) {
   if (me) return json({ linked: true, staff: me, line_name: lineUser.name });
 
   const { results } = await env.DB.prepare(
-    "SELECT id, name FROM staff WHERE active = 1 AND line_user_id IS NULL ORDER BY id"
+    "SELECT id, name FROM staff WHERE active = 1 AND line_user_id IS NULL ORDER BY sort_order, id"
   ).all();
   return json({ linked: false, candidates: results, line_name: lineUser.name });
 }
@@ -274,10 +277,30 @@ async function addStaff(env, body) {
   if (name.length < 1 || name.length > 30) {
     return json({ error: "名前は1〜30文字で入力してください" }, 400);
   }
-  const row = await env.DB.prepare("INSERT INTO staff (name) VALUES (?) RETURNING id, name")
+  // 新しく追加した人は、並び順の一番下にする
+  const row = await env.DB.prepare(
+    `INSERT INTO staff (name, sort_order)
+     VALUES (?, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM staff))
+     RETURNING id, name`
+  )
     .bind(name)
     .first();
   return json({ staff: row });
+}
+
+// 並び順を保存する（ids に上から順番に並べたスタッフのidが入ってくる）
+async function saveStaffOrder(env, body) {
+  const ids = body?.ids;
+  if (!Array.isArray(ids) || ids.length === 0 || ids.length > 500 || !ids.every(Number.isInteger)) {
+    return json({ error: "並び順が正しくありません" }, 400);
+  }
+  if (new Set(ids).size !== ids.length) return json({ error: "同じ人が重複しています" }, 400);
+
+  // 上から 1, 2, 3, … と番号をふり直す（全部まとめて保存）
+  await env.DB.batch(
+    ids.map((id, i) => env.DB.prepare("UPDATE staff SET sort_order = ? WHERE id = ?").bind(i + 1, id))
+  );
+  return json({ ok: true });
 }
 
 // スタッフを一覧から外す（提出データは残す。LINEとの結びつけは外す）
@@ -400,7 +423,7 @@ async function listSubmissions(env, url) {
   const [staffRes, subRes, dayRes, reqRes, remindRes] = await env.DB.batch([
     env.DB.prepare(
       `SELECT id, name, line_name, line_user_id IS NOT NULL AS linked
-         FROM staff WHERE active = 1 ORDER BY id`
+         FROM staff WHERE active = 1 ORDER BY sort_order, id`
     ),
     env.DB.prepare("SELECT * FROM submissions WHERE period = ?").bind(period),
     env.DB.prepare(

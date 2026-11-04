@@ -68,8 +68,9 @@
         </p>
 
         <section class="card" style="margin-top: 20px; max-width: 480px">
-          <h2>スタッフの登録</h2>
+          <h2>スタッフの登録・並び順</h2>
           <p class="hint">ここで登録した名前が、スタッフがLINEで初めて開いたときの選択肢に出る。一度選ばれた名前はそのLINEアカウント専用になる。</p>
+          <p class="hint">名前の左の「⋮⋮」をドラッグすると並び順を変えられる（一覧表の行の順番も変わる）。</p>
           <div class="row">
             <input id="staff-name" type="text" maxlength="30" placeholder="名前" />
             <button id="staff-add" type="button" style="flex: 0 0 auto">追加</button>
@@ -80,6 +81,8 @@
       </div>
     </main>
 
+    <!-- ドラッグで並び替えるための部品（SortableJS） -->
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.7/Sortable.min.js"></script>
     <script src="common.js"></script>
     <script src="admin.js"></script>
   </body>

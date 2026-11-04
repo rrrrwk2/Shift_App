@@ -350,6 +350,14 @@ function renderStaffList(staff) {
   els.staffList.innerHTML = "";
   for (const person of staff) {
     const li = document.createElement("li");
+    li.dataset.id = person.id;
+
+    // ドラッグするときにつかむところ
+    const handle = document.createElement("span");
+    handle.className = "drag-handle";
+    handle.textContent = "⋮⋮";
+    handle.title = "ドラッグして並び替え";
+    handle.hidden = typeof Sortable === "undefined"; // 部品が読み込めなかったときは出さない
 
     // 名前と、どのLINEアカウントと結びついているか
     const info = document.createElement("div");
@@ -379,9 +387,37 @@ function renderStaffList(staff) {
     remove.addEventListener("click", () => onRemoveStaff(person));
     buttons.append(remove);
 
-    li.append(info, buttons);
+    li.append(handle, info, buttons);
     els.staffList.append(li);
   }
+  setupSortable();
+}
+
+// ---------------------------------------------------------
+// ドラッグで並び替える
+// ---------------------------------------------------------
+let sortable = null;
+
+function setupSortable() {
+  if (sortable || typeof Sortable === "undefined") return; // 準備は最初の1回だけ
+  sortable = Sortable.create(els.staffList, {
+    handle: ".drag-handle", // 「⋮⋮」をつかんだときだけ動かせる（ボタンを押し間違えないように）
+    animation: 150,
+    forceFallback: true, // パソコンでもスマホでも同じ動き方にする
+    onEnd: async (event) => {
+      if (event.oldIndex === event.newIndex) return; // 動いていない
+      const ids = [...els.staffList.children].map((li) => Number(li.dataset.id));
+      try {
+        await api("/api/admin/staff/order", { method: "POST", body: { ids }, key: adminKey });
+        setStaffMessage("並び順を保存しました", "success");
+        await load(); // 一覧表も新しい順番で描き直す
+      } catch (err) {
+        if (err instanceof AuthError) handleError(err);
+        else setStaffMessage(err.message, "error");
+        await load(); // 保存できなかったら元の順番に戻す
+      }
+    },
+  });
 }
 
 // 間違ったLINEアカウントと結びついたときに解除する
