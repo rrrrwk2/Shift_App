@@ -486,24 +486,44 @@ async function runDailyReminder(env, now) {
   }
 }
 
-// 管理者用：今すぐ未提出の人に送る
+// 管理者用：一覧でチェックを付けた未提出の人にだけ送る
 async function sendManualReminder(env, body) {
   const period = body?.period;
+  const staffIds = body?.staff_ids;
   if (!isPeriod(period)) return json({ error: "月の指定が正しくありません" }, 400);
   if (isClosed(period)) return json({ error: "この月はもう締め切られています" }, 400);
+  if (!Array.isArray(staffIds) || staffIds.length === 0 || !staffIds.every(Number.isInteger)) {
+    return json({ error: "送る人を選んでください" }, 400);
+  }
+  if (staffIds.length > 500) return json({ error: "一度に選べるのは500人までです" }, 400);
   if (!env.LINE_MESSAGING_TOKEN) {
     return json({ error: "LINEで送るための設定（LINE_MESSAGING_TOKEN）がまだです" }, 503);
   }
 
+  // 選ばれた人のうち、本当に「在籍中・LINE連携済み・未提出」の人だけに絞る
+  const placeholders = staffIds.map(() => "?").join(",");
+  const { results } = await env.DB.prepare(
+    `SELECT line_user_id FROM staff
+      WHERE id IN (${placeholders})
+        AND active = 1 AND line_user_id IS NOT NULL
+        AND id NOT IN (SELECT staff_id FROM submissions WHERE period = ?)`
+  )
+    .bind(...staffIds, period)
+    .all();
+  const userIds = results.map((r) => r.line_user_id);
+  if (userIds.length === 0) {
+    return json({ error: "選んだ人はもう提出済みか、LINE連携していません" }, 400);
+  }
+
   const daysLeft = Math.ceil((deadlineOf(period).getTime() - Date.now()) / (24 * 60 * 60 * 1000));
-  const count = await remindUnsubmitted(env, period, daysLeft);
+  await sendReminderMessage(env, userIds, period, daysLeft);
   await env.DB.prepare("INSERT INTO reminder_log (period, kind, recipients) VALUES (?, 'manual', ?)")
-    .bind(period, count)
+    .bind(period, userIds.length)
     .run();
-  return json({ ok: true, recipients: count });
+  return json({ ok: true, recipients: userIds.length });
 }
 
-// まだ提出していない人（LINE連携済みの人だけ）にお願いを送り、送った人数を返す
+// まだ提出していない人（LINE連携済みの人だけ）全員にお願いを送り、送った人数を返す（自動送信用）
 async function remindUnsubmitted(env, period, daysLeft) {
   const { results } = await env.DB.prepare(
     `SELECT line_user_id FROM staff
@@ -514,7 +534,12 @@ async function remindUnsubmitted(env, period, daysLeft) {
     .all();
   const userIds = results.map((r) => r.line_user_id);
   if (userIds.length === 0) return 0;
+  await sendReminderMessage(env, userIds, period, daysLeft);
+  return userIds.length;
+}
 
+// 指定したLINEユーザーに提出のお願いを送る
+async function sendReminderMessage(env, userIds, period, daysLeft) {
   const [, month] = period.split("-").map(Number);
   const when = daysLeft <= 1 ? "明日" : `あと${daysLeft}日`;
   const text =
@@ -542,7 +567,6 @@ async function remindUnsubmitted(env, period, daysLeft) {
       throw new Error(`LINEへの送信に失敗しました（${res.status}）: ${await res.text()}`);
     }
   }
-  return userIds.length;
 }
 
 // =========================================================

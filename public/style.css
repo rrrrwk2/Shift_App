@@ -539,3 +539,34 @@ table.grid td.note {
   padding: 4px 0;
   border-bottom: 1px solid var(--line);
 }
+
+/* ---------- 未提出の人の一覧（チェックして送る） ---------- */
+.sub-title {
+  margin: 16px 0 6px;
+  font-size: 0.9rem;
+}
+
+.unsubmitted-list {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+}
+
+.unsubmitted-list li {
+  padding: 4px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.check-row input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+}

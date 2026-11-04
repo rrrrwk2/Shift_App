@@ -40,9 +40,19 @@
           <p class="hint" id="remind-hint">
             締切の3日前（12日）と前日（14日）の12:00に、まだ提出していない人へLINEで自動送信。LINE連携していない人には届かない。
           </p>
-          <ul id="remind-log" class="remind-log"></ul>
-          <button id="remind-button" type="button">未提出の人に今すぐ送る</button>
+
+          <!-- 未提出の人：チェックを付けた人にだけ個別にお願いを送れる -->
+          <h3 id="unsubmitted-title" class="sub-title">未提出の人</h3>
+          <label id="check-all-label" class="check-row">
+            <input id="check-all" type="checkbox" />
+            <span>全員選ぶ</span>
+          </label>
+          <ul id="unsubmitted-list" class="unsubmitted-list"></ul>
+          <button id="remind-button" type="button" disabled>選んだ人に送る</button>
           <div id="remind-message" class="message"></div>
+
+          <h3 class="sub-title">送信記録</h3>
+          <ul id="remind-log" class="remind-log"></ul>
         </section>
 
         <section id="requests-card" class="card" hidden>
