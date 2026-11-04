@@ -577,7 +577,13 @@ table.grid td.note {
 }
 
 .staff-list li > div:nth-child(2) {
-  flex: 1;
+  flex: 1 1 9em; /* 名前の欄は狭くなりすぎないようにして、選択欄のほうを次の行に回す */
+  min-width: 9em;
+}
+
+.staff-list li > div:nth-child(3) {
+  margin-left: auto;
+  flex-wrap: wrap;
 }
 
 .drag-handle {
@@ -606,4 +612,138 @@ table.grid tfoot tr.sub-count td {
   width: auto;
   padding: 4px 6px;
   font-size: 0.8rem;
+}
+
+/* ---------- 毎日のルール（足りない日の色分け） ---------- */
+:root {
+  --warn-bg: #fff1c2; /* ○だけでは足りない日 */
+  --ng-bg: #fbd5d0; /* △を入れても足りない日 */
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --warn-bg: #4a3d14;
+    --ng-bg: #5a2420;
+  }
+}
+
+table.grid th.warn,
+table.grid tfoot td.warn {
+  background: var(--warn-bg);
+}
+
+table.grid th.ng,
+table.grid tfoot td.ng {
+  background: var(--ng-bg);
+}
+
+table.grid td.level-veteran {
+  font-weight: 700;
+}
+
+.legend {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.legend-box {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  border: 1px solid var(--line);
+  margin-left: 8px;
+}
+
+.legend-box.warn {
+  background: var(--warn-bg);
+}
+
+.legend-box.ng {
+  background: var(--ng-bg);
+}
+
+.rules-card summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.rules-card summary::-webkit-details-marker {
+  display: none;
+}
+
+.rules-card summary h2 {
+  display: inline;
+  margin: 0;
+}
+
+.rules-card summary::after {
+  content: " ▼";
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.rules-card[open] summary::after {
+  content: " ▲";
+}
+
+.rules-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 8px 16px;
+}
+
+.rules-grid label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+}
+
+.rules-grid input[type="number"] {
+  width: 4.5em;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+}
+
+.weekday-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+}
+
+.issues-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 0.9rem;
+}
+
+.issues-list li {
+  padding: 6px 8px;
+  border-radius: 8px;
+  margin-bottom: 4px;
+}
+
+.issues-list li.warn {
+  background: var(--warn-bg);
+}
+
+.issues-list li.ng {
+  background: var(--ng-bg);
+}
+
+.issue-date {
+  display: inline-block;
+  min-width: 6em;
+  font-weight: 700;
+}
+
+/* 名簿：選択欄やボタンが多いので、狭い画面では折り返す */
+.staff-list li {
+  flex-wrap: wrap;
 }

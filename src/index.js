@@ -80,6 +80,12 @@ async function handleApi(request, env, url) {
     if (path === "/api/admin/staff/deactivate" && method === "POST") {
       return deactivateStaff(env, await readJson(request));
     }
+    if (path === "/api/admin/staff/level" && method === "POST") {
+      return setStaffLevel(env, await readJson(request));
+    }
+    if (path === "/api/admin/rules" && method === "POST") {
+      return saveRules(env, await readJson(request));
+    }
     if (path === "/api/admin/staff/gender" && method === "POST") {
       return setStaffGender(env, await readJson(request));
     }
@@ -303,6 +309,54 @@ async function setStaffGender(env, body) {
   return json({ ok: true });
 }
 
+// レベルを設定する（作成担当だけ。ベテランが少ない日を見つけるため）
+async function setStaffLevel(env, body) {
+  const id = Number(body?.id);
+  const level = body?.level ?? null;
+  if (!Number.isInteger(id)) return json({ error: "idが正しくありません" }, 400);
+  if (level !== null && !["new", "regular", "veteran"].includes(level)) {
+    return json({ error: "レベルの値が正しくありません" }, 400);
+  }
+  await env.DB.prepare("UPDATE staff SET level = ? WHERE id = ?").bind(level, id).run();
+  return json({ ok: true });
+}
+
+// 毎日のルール（何人以上必要か）。null の項目はチェックしない
+const DEFAULT_RULES = {
+  min_total: null, // ○の合計
+  min_veteran: null, // そのうちベテラン
+  min_male: null, // そのうち男性
+  min_female: null, // そのうち女性
+  closed_weekdays: [], // チェックしない曜日（0=日曜 〜 6=土曜）。定休日など
+};
+
+async function saveRules(env, body) {
+  const rules = {};
+  for (const key of ["min_total", "min_veteran", "min_male", "min_female"]) {
+    const v = body?.[key];
+    if (v === null || v === undefined || v === "") {
+      rules[key] = null;
+    } else if (Number.isInteger(v) && v >= 0 && v <= 99) {
+      rules[key] = v;
+    } else {
+      return json({ error: "人数は0〜99で入力してください" }, 400);
+    }
+  }
+  const closed = body?.closed_weekdays ?? [];
+  if (!Array.isArray(closed) || !closed.every((d) => Number.isInteger(d) && d >= 0 && d <= 6)) {
+    return json({ error: "曜日の指定が正しくありません" }, 400);
+  }
+  rules.closed_weekdays = [...new Set(closed)].sort();
+
+  await env.DB.prepare(
+    `INSERT INTO settings (key, value, updated_at) VALUES ('daily_rules', ?, datetime('now'))
+     ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`
+  )
+    .bind(JSON.stringify(rules))
+    .run();
+  return json({ ok: true, rules });
+}
+
 // 並び順を保存する（ids に上から順番に並べたスタッフのidが入ってくる）
 async function saveStaffOrder(env, body) {
   const ids = body?.ids;
@@ -435,9 +489,9 @@ async function listSubmissions(env, url) {
   const period = url.searchParams.get("period") ?? "";
   if (!isPeriod(period)) return json({ error: "月の指定が正しくありません" }, 400);
 
-  const [staffRes, subRes, dayRes, reqRes, remindRes] = await env.DB.batch([
+  const [staffRes, subRes, dayRes, reqRes, remindRes, rulesRes] = await env.DB.batch([
     env.DB.prepare(
-      `SELECT id, name, gender, line_name, line_user_id IS NOT NULL AS linked
+      `SELECT id, name, gender, level, line_name, line_user_id IS NOT NULL AS linked
          FROM staff WHERE active = 1 ORDER BY sort_order, id`
     ),
     env.DB.prepare("SELECT * FROM submissions WHERE period = ?").bind(period),
@@ -458,6 +512,7 @@ async function listSubmissions(env, url) {
     env.DB.prepare(
       "SELECT kind, recipients, sent_at FROM reminder_log WHERE period = ? ORDER BY id DESC"
     ).bind(period),
+    env.DB.prepare("SELECT value FROM settings WHERE key = 'daily_rules'"),
   ]);
 
   // 提出ごとに日ごとの希望をまとめる
@@ -471,6 +526,7 @@ async function listSubmissions(env, url) {
     submissions,
     change_requests: reqRes.results,
     reminders: remindRes.results,
+    rules: rulesRes.results[0] ? JSON.parse(rulesRes.results[0].value) : DEFAULT_RULES,
     reminder_ready: Boolean(env.LINE_MESSAGING_TOKEN), // LINEで送る準備ができているか
     period_info: periodInfo(period),
   });

@@ -30,6 +30,16 @@ const els = {
   requestsCard: $("requests-card"),
   requestsTitle: $("requests-title"),
   requestsList: $("requests-list"),
+  ruleTotal: $("rule-total"),
+  ruleVeteran: $("rule-veteran"),
+  ruleMale: $("rule-male"),
+  ruleFemale: $("rule-female"),
+  ruleClosed: $("rule-closed"),
+  rulesSave: $("rules-save"),
+  rulesMessage: $("rules-message"),
+  issuesCard: $("issues-card"),
+  issuesTitle: $("issues-title"),
+  issuesList: $("issues-list"),
 };
 
 let adminKey = loadKey(ADMIN_KEY_NAME);
@@ -45,6 +55,7 @@ async function init() {
   els.reloadButton.addEventListener("click", load);
   els.staffAdd.addEventListener("click", onAddStaff);
   els.remindButton.addEventListener("click", onRemindNow);
+  els.rulesSave.addEventListener("click", onSaveRules);
   els.checkAll.addEventListener("change", () => {
     for (const box of checkableBoxes()) box.checked = els.checkAll.checked;
     updateRemindButton();
@@ -108,7 +119,8 @@ async function load() {
   const period = els.periodSelect.value;
   try {
     const data = await api(`/api/admin/submissions?period=${period}`, { key: adminKey });
-    renderGrid(period, data.staff, data.submissions, data.period_info);
+    renderGrid(period, data.staff, data.submissions, data.period_info, data.rules);
+    renderRulesForm(data.rules);
     renderRequests(data.change_requests);
     renderReminders(data);
     renderStaffList(data.staff);
@@ -117,91 +129,199 @@ async function load() {
   }
 }
 
-function renderGrid(period, staff, submissions, periodInfo) {
+function renderGrid(period, staff, submissions, periodInfo, rules) {
   const total = daysInMonth(period);
   const dates = Array.from({ length: total }, (_, i) => toDate(period, i + 1));
 
   // staff_id → 提出内容 の対応表を作る
   const byStaff = new Map(submissions.map((s) => [s.staff_id, s]));
 
-  // 日ごとに ○△ の人数を、全体・男性・女性に分けて数える
-  //   count.ok.all["2026-12-03"] → その日に○の人の数
-  //   count.ok.male["2026-12-03"] → そのうち男性の数
+  // 日ごとに ○△ の人数を、全体・男性・女性・ベテランに分けて数える
+  //   count.ok.all["2026-12-03"]     → その日に○の人の数
+  //   count.ok.veteran["2026-12-03"] → そのうちベテランの数
   const zero = () => Object.fromEntries(dates.map((d) => [d, 0]));
-  const count = {
-    ok: { all: zero(), male: zero(), female: zero() },
-    maybe: { all: zero(), male: zero(), female: zero() },
-  };
+  const newCounter = () => ({ all: zero(), male: zero(), female: zero(), veteran: zero() });
+  const count = { ok: newCounter(), maybe: newCounter() };
 
-  // ---- 見出し ----
-  let html =
-    "<thead><tr><th class='name'>名前</th><th>性別</th><th>週の希望</th><th>基本の時間</th>";
-  for (const date of dates) {
-    const wd = weekdayOf(date);
-    const cls = wd === 0 ? "sun" : wd === 6 ? "sat" : "";
-    html += `<th class="${cls}">${Number(date.slice(-2))}<br>${WEEKDAYS[wd]}</th>`;
-  }
-  html += "<th>備考</th><th>更新</th></tr></thead><tbody>";
-
-  // ---- 1人1行 ----
+  // ---- 1人1行（先に数えてから見出しを作るので、行は別にためておく） ----
+  let body = "<tbody>";
   let submittedCount = 0;
   for (const person of staff) {
     const sub = byStaff.get(person.id);
     if (sub) submittedCount++;
     const dayMap = new Map((sub?.days ?? []).map((d) => [d.date, d]));
 
-    html += `<tr class="${sub ? "" : "unsubmitted"}"><td class="name">${escapeHtml(person.name)}</td>`;
-    html += `<td>${GENDER_SHORT[person.gender] ?? "-"}</td>`;
-    html += `<td>${sub ? weeklyText(sub) : "未提出"}</td>`;
-    html += `<td>${sub ? escapeHtml(formatRange(sub.default_start, sub.default_end) || "-") : ""}</td>`;
+    body += `<tr class="${sub ? "" : "unsubmitted"}"><td class="name">${escapeHtml(person.name)}</td>`;
+    body += `<td>${GENDER_SHORT[person.gender] ?? "-"}</td>`;
+    body += `<td class="${person.level === "veteran" ? "level-veteran" : ""}">${LEVEL_SHORT[person.level] ?? "-"}</td>`;
+    body += `<td>${sub ? weeklyText(sub) : "未提出"}</td>`;
+    body += `<td>${sub ? escapeHtml(formatRange(sub.default_start, sub.default_end) || "-") : ""}</td>`;
     for (const date of dates) {
       const d = dayMap.get(date);
       if (!d) {
-        html += "<td></td>";
+        body += "<td></td>";
         continue;
       }
       const c = count[d.status]; // ○なら count.ok、△なら count.maybe
       c.all[date]++;
       if (person.gender === "male") c.male[date]++;
       if (person.gender === "female") c.female[date]++;
+      if (person.level === "veteran") c.veteran[date]++;
       const mark = d.status === "ok" ? "○" : "△";
       const time = formatRange(d.start_time, d.end_time);
-      html += `<td class="${d.status}">${mark}${
+      body += `<td class="${d.status}">${mark}${
         time ? `<span class="time">${escapeHtml(time)}</span>` : ""
       }</td>`;
     }
-    html += `<td class="note">${escapeHtml(sub?.note ?? "")}</td>`;
-    html += `<td>${sub ? escapeHtml(formatUpdated(sub.updated_at)) : ""}</td></tr>`;
+    body += `<td class="note">${escapeHtml(sub?.note ?? "")}</td>`;
+    body += `<td>${sub ? escapeHtml(formatUpdated(sub.updated_at)) : ""}</td></tr>`;
   }
-  html += "</tbody>";
+  body += "</tbody>";
+
+  // ---- ルールの判定（日ごと） ----
+  const judged = Object.fromEntries(dates.map((date) => [date, judgeDay(date, count, rules)]));
+
+  // ---- 見出し（足りない日は色をつける） ----
+  let head =
+    "<thead><tr><th class='name'>名前</th><th>性別</th><th>レベル</th><th>週の希望</th><th>基本の時間</th>";
+  for (const date of dates) {
+    const wd = weekdayOf(date);
+    const cls = [wd === 0 ? "sun" : wd === 6 ? "sat" : "", judged[date].level].join(" ");
+    head += `<th class="${cls}" title="${escapeHtml(judged[date].reasons.join("、"))}">${Number(
+      date.slice(-2)
+    )}<br>${WEEKDAYS[wd]}</th>`;
+  }
+  head += "<th>備考</th><th>更新</th></tr></thead>";
 
   // ---- 合計（日ごとの人数） ----
   const footRow = (label, values, cls = "") => {
-    let row = `<tr class="${cls}"><td class='name'>${label}</td><td colspan='3'></td>`;
-    for (const date of dates) row += `<td>${values[date] || ""}</td>`;
+    let row = `<tr class="${cls}"><td class='name'>${label}</td><td colspan='4'></td>`;
+    for (const date of dates) {
+      row += `<td class="${judged[date].level}">${values[date] || ""}</td>`;
+    }
     return row + "<td colspan='2'></td></tr>";
   };
-  html += "<tfoot>";
-  html += footRow("○の人数", count.ok.all);
-  html += footRow("　うち男性", count.ok.male, "sub-count male");
-  html += footRow("　うち女性", count.ok.female, "sub-count female");
-  html += footRow("△の人数", count.maybe.all);
-  html += footRow("　うち男性", count.maybe.male, "sub-count male");
-  html += footRow("　うち女性", count.maybe.female, "sub-count female");
-  html += "</tfoot>";
+  let foot = "<tfoot>";
+  foot += footRow("○の人数", count.ok.all);
+  foot += footRow("　うち男性", count.ok.male, "sub-count");
+  foot += footRow("　うち女性", count.ok.female, "sub-count");
+  foot += footRow("　うちベテラン", count.ok.veteran, "sub-count");
+  foot += footRow("△の人数", count.maybe.all);
+  foot += footRow("　うち男性", count.maybe.male, "sub-count");
+  foot += footRow("　うち女性", count.maybe.female, "sub-count");
+  foot += footRow("　うちベテラン", count.maybe.veteran, "sub-count");
+  foot += "</tfoot>";
 
-  els.grid.innerHTML = html;
+  els.grid.innerHTML = head + body + foot;
+  renderIssues(dates, judged);
+
   const deadline = periodInfo.open
     ? `提出期限 ${periodInfo.deadline}まで`
     : `提出期限 ${periodInfo.deadline}（締切済み）`;
   const noGender = staff.filter((p) => !p.gender).length;
+  const noLevel = staff.filter((p) => !p.level).length;
   els.summary.textContent =
     `${formatPeriod(period)}：提出済み ${submittedCount} / ${staff.length}人 ・ ${deadline}` +
-    (noGender ? ` ・ 性別未設定 ${noGender}人（下の名簿で設定できます）` : "");
+    (noGender ? ` ・ 性別未設定 ${noGender}人` : "") +
+    (noLevel ? ` ・ レベル未設定 ${noLevel}人` : "");
 }
 
-// 性別の表示（作成担当だけが見る）
+// ---------------------------------------------------------
+// 毎日のルールの判定
+//   level: ""     … 足りている（またはチェックしない日）
+//          "warn" … ○の人だけでは足りないが、△の人も入れば足りる
+//          "ng"   … △の人を入れても足りない
+//   reasons: 足りないものの説明（例：「ベテラン 0/1人」）
+// ---------------------------------------------------------
+const RULE_ITEMS = [
+  { key: "min_total", label: "合計", counter: "all" },
+  { key: "min_veteran", label: "ベテラン", counter: "veteran" },
+  { key: "min_male", label: "男性", counter: "male" },
+  { key: "min_female", label: "女性", counter: "female" },
+];
+
+function judgeDay(date, count, rules) {
+  if (rules.closed_weekdays.includes(weekdayOf(date))) return { level: "", reasons: [] };
+
+  let level = "";
+  const reasons = [];
+  for (const item of RULE_ITEMS) {
+    const need = rules[item.key];
+    if (need === null || need === undefined) continue; // この項目はチェックしない
+    const ok = count.ok[item.counter][date];
+    const withMaybe = ok + count.maybe[item.counter][date];
+    if (ok >= need) continue; // ○だけで足りている
+    reasons.push(`${item.label} ${ok}/${need}人${withMaybe >= need ? "（△を入れれば足りる）" : ""}`);
+    if (withMaybe < need) level = "ng";
+    else if (level !== "ng") level = "warn";
+  }
+  return { level, reasons };
+}
+
+// 足りない日を文章で一覧にする（スマホでも分かるように）
+function renderIssues(dates, judged) {
+  const bad = dates.filter((d) => judged[d].level);
+  els.issuesCard.hidden = bad.length === 0;
+  els.issuesTitle.textContent = `人が足りない日（${bad.length}日）`;
+  els.issuesList.innerHTML = bad
+    .map(
+      (d) =>
+        `<li class="${judged[d].level}"><span class="issue-date">${formatDate(d)}</span>${escapeHtml(
+          judged[d].reasons.join("、")
+        )}</li>`
+    )
+    .join("");
+}
+
+// ---------------------------------------------------------
+// ルールの設定欄
+// ---------------------------------------------------------
+let currentRules = null;
+
+function renderRulesForm(rules) {
+  currentRules = rules;
+  els.ruleTotal.value = rules.min_total ?? "";
+  els.ruleVeteran.value = rules.min_veteran ?? "";
+  els.ruleMale.value = rules.min_male ?? "";
+  els.ruleFemale.value = rules.min_female ?? "";
+  els.ruleClosed.innerHTML = WEEKDAYS.map(
+    (w, i) =>
+      `<label class="check-row"><input type="checkbox" value="${i}" ${
+        rules.closed_weekdays.includes(i) ? "checked" : ""
+      } />${w}</label>`
+  ).join("");
+}
+
+async function onSaveRules() {
+  const num = (input) => (input.value === "" ? null : Number(input.value));
+  const body = {
+    min_total: num(els.ruleTotal),
+    min_veteran: num(els.ruleVeteran),
+    min_male: num(els.ruleMale),
+    min_female: num(els.ruleFemale),
+    closed_weekdays: [...els.ruleClosed.querySelectorAll("input:checked")].map((b) => Number(b.value)),
+  };
+  els.rulesSave.disabled = true;
+  try {
+    await api("/api/admin/rules", { method: "POST", body, key: adminKey });
+    await load();
+    setRulesMessage("保存しました", "success");
+  } catch (err) {
+    if (err instanceof AuthError) handleError(err);
+    else setRulesMessage(err.message, "error");
+  } finally {
+    els.rulesSave.disabled = false;
+  }
+}
+
+function setRulesMessage(text, type = "") {
+  els.rulesMessage.textContent = text;
+  els.rulesMessage.className = "message" + (type ? ` ${type}` : "");
+}
+
+// 性別・レベルの表示（作成担当だけが見る）
 const GENDER_SHORT = { male: "男", female: "女" };
+const LEVEL_SHORT = { new: "新人", regular: "通常", veteran: "ベテラン" };
 
 // 週の日数の希望を文章にする
 function weeklyText(sub) {
@@ -407,6 +527,16 @@ function renderStaffList(staff) {
     gender.value = person.gender ?? "";
     gender.addEventListener("change", () => onChangeGender(person, gender.value || null));
     buttons.append(gender);
+
+    // レベル（ベテランが少ない日を見つけるため。スタッフ側の画面には出ない）
+    const level = document.createElement("select");
+    level.className = "gender-select";
+    level.setAttribute("aria-label", `${person.name} さんのレベル`);
+    level.innerHTML =
+      '<option value="">レベル</option><option value="new">新人</option><option value="regular">通常</option><option value="veteran">ベテラン</option>';
+    level.value = person.level ?? "";
+    level.addEventListener("change", () => onChangeLevel(person, level.value || null));
+    buttons.append(level);
     if (person.linked) {
       const unlink = document.createElement("button");
       unlink.type = "button";
@@ -457,6 +587,17 @@ function setupSortable() {
 async function onChangeGender(person, gender) {
   try {
     await api("/api/admin/staff/gender", { method: "POST", body: { id: person.id, gender }, key: adminKey });
+    await load();
+  } catch (err) {
+    if (err instanceof AuthError) handleError(err);
+    else setStaffMessage(err.message, "error");
+  }
+}
+
+// レベルを保存して、一覧表を数え直す
+async function onChangeLevel(person, level) {
+  try {
+    await api("/api/admin/staff/level", { method: "POST", body: { id: person.id, level }, key: adminKey });
     await load();
   } catch (err) {
     if (err instanceof AuthError) handleError(err);

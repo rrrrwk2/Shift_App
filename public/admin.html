@@ -60,18 +60,44 @@
           <ul id="requests-list" class="request-list"></ul>
         </section>
 
+        <!-- 毎日のルール：足りない日を色で知らせる -->
+        <details id="rules-card" class="card rules-card">
+          <summary><h2>毎日の必要人数（ルール）</h2></summary>
+          <p class="hint">○の人がこの人数に届かない日を色で知らせる。空欄の項目はチェックしない。</p>
+          <div class="rules-grid">
+            <label>合計<input id="rule-total" type="number" min="0" max="99" inputmode="numeric" />人以上</label>
+            <label>ベテラン<input id="rule-veteran" type="number" min="0" max="99" inputmode="numeric" />人以上</label>
+            <label>男性<input id="rule-male" type="number" min="0" max="99" inputmode="numeric" />人以上</label>
+            <label>女性<input id="rule-female" type="number" min="0" max="99" inputmode="numeric" />人以上</label>
+          </div>
+          <p class="hint" style="margin: 12px 0 6px">チェックしない曜日（定休日など）</p>
+          <div id="rule-closed" class="weekday-checks"></div>
+          <button id="rules-save" type="button" style="margin-top: 12px">保存</button>
+          <div id="rules-message" class="message"></div>
+        </details>
+
         <div class="table-wrap">
           <table id="grid" class="grid"></table>
         </div>
         <p class="hint" style="margin-top: 8px">
           時間記載なし→その人の基本の時間。
         </p>
+        <p class="hint legend">
+          <span class="legend-box warn"></span>○だけでは足りない（△の人も入れば足りる）
+          <span class="legend-box ng"></span>△の人を入れても足りない
+        </p>
+
+        <!-- ルールを満たさない日の一覧 -->
+        <section id="issues-card" class="card issues-card" hidden>
+          <h2 id="issues-title">人が足りない日</h2>
+          <ul id="issues-list" class="issues-list"></ul>
+        </section>
 
         <section class="card" style="margin-top: 20px; max-width: 480px">
           <h2>スタッフの登録・並び順</h2>
           <p class="hint">ここで登録した名前が、スタッフがLINEで初めて開いたときの選択肢に出る。一度選ばれた名前はそのLINEアカウント専用になる。</p>
           <p class="hint">名前の左の「⋮⋮」をドラッグすると並び順を変えられる（一覧表の行の順番も変わる）。</p>
-          <p class="hint">性別は日ごとの男女の人数を数えるためのもの。この画面でだけ見られて、スタッフ側には出ない。</p>
+          <p class="hint">性別とレベルは日ごとの人数を数えるためのもの。この画面でだけ見られて、スタッフ側には出ない。</p>
           <div class="row">
             <input id="staff-name" type="text" maxlength="30" placeholder="名前" />
             <button id="staff-add" type="button" style="flex: 0 0 auto">追加</button>
