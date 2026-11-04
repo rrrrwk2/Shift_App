@@ -19,6 +19,9 @@ const els = {
   staffAdd: $("staff-add"),
   staffMessage: $("staff-message"),
   staffList: $("staff-list"),
+  requestsCard: $("requests-card"),
+  requestsTitle: $("requests-title"),
+  requestsList: $("requests-list"),
 };
 
 let adminKey = loadKey(ADMIN_KEY_NAME);
@@ -26,7 +29,6 @@ let adminKey = loadKey(ADMIN_KEY_NAME);
 init();
 
 async function init() {
-  fillPeriodSelect(els.periodSelect);
   els.keyButton.addEventListener("click", onKeyEntered);
   els.keyInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter") onKeyEntered();
@@ -48,6 +50,8 @@ async function init() {
 async function start() {
   try {
     await api("/api/admin/check", { key: adminKey });
+    // 月の選択肢（締切情報つき）をサーバーから受け取る
+    fillPeriodSelect(els.periodSelect, await api("/api/periods", { key: adminKey }));
     els.keySection.hidden = true;
     els.content.hidden = false;
     await load();
@@ -91,14 +95,15 @@ async function load() {
   const period = els.periodSelect.value;
   try {
     const data = await api(`/api/admin/submissions?period=${period}`, { key: adminKey });
-    renderGrid(period, data.staff, data.submissions);
+    renderGrid(period, data.staff, data.submissions, data.period_info);
+    renderRequests(data.change_requests);
     renderStaffList(data.staff);
   } catch (err) {
     handleError(err);
   }
 }
 
-function renderGrid(period, staff, submissions) {
+function renderGrid(period, staff, submissions, periodInfo) {
   const total = daysInMonth(period);
   const dates = Array.from({ length: total }, (_, i) => toDate(period, i + 1));
 
@@ -155,7 +160,10 @@ function renderGrid(period, staff, submissions) {
   html += "<td colspan='2'></td></tr></tfoot>";
 
   els.grid.innerHTML = html;
-  els.summary.textContent = `${formatPeriod(period)}：提出済み ${submittedCount} / ${staff.length}人`;
+  const deadline = periodInfo.open
+    ? `提出期限 ${periodInfo.deadline}まで`
+    : `提出期限 ${periodInfo.deadline}（締切済み）`;
+  els.summary.textContent = `${formatPeriod(period)}：提出済み ${submittedCount} / ${staff.length}人 ・ ${deadline}`;
 }
 
 // 週の日数の希望を文章にする
@@ -168,11 +176,47 @@ function weeklyText(sub) {
   return "-";
 }
 
-// データベースの時刻（UTC）を日本時間の "12/3 18:40" にする
-function formatUpdated(utc) {
-  if (!utc) return "";
-  const d = new Date(utc.replace(" ", "T") + "Z");
-  return `${d.getMonth() + 1}/${d.getDate()} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+// ---------------------------------------------------------
+// 変更の申請
+// ---------------------------------------------------------
+function renderRequests(requests) {
+  const openCount = requests.filter((r) => r.status === "open").length;
+  els.requestsCard.hidden = requests.length === 0;
+  els.requestsTitle.textContent = `変更の申請（未対応 ${openCount}件）`;
+  els.requestsList.innerHTML = "";
+
+  for (const r of requests) {
+    const li = document.createElement("li");
+    const done = r.status === "done";
+    li.innerHTML = `
+      <div class="request-head">
+        <span class="${done ? "status-done" : "status-open"}">${done ? "対応済み" : "未対応"}</span>
+        <strong>${escapeHtml(r.name)}</strong>
+        <span class="hint" style="margin:0">${escapeHtml(formatUpdated(r.created_at))}</span>
+      </div>
+      <div class="request-body">${escapeHtml(r.message)}</div>
+    `;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = done ? "未対応に戻す" : "対応済みにする";
+    button.style.marginTop = "8px";
+    button.addEventListener("click", () => setRequestStatus(r.id, done ? "open" : "done"));
+    li.append(button);
+    els.requestsList.append(li);
+  }
+}
+
+async function setRequestStatus(id, status) {
+  try {
+    await api("/api/admin/change-request/status", {
+      method: "POST",
+      body: { id, status },
+      key: adminKey,
+    });
+    await load();
+  } catch (err) {
+    handleError(err);
+  }
 }
 
 // ---------------------------------------------------------

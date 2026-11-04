@@ -52,7 +52,11 @@ async function api(path, { method = "GET", body, key } = {}) {
   }
 
   if (res.status === 401) throw new AuthError(data?.error || "合言葉が違います");
-  if (!res.ok) throw new Error(data?.error || `通信エラー（${res.status}）`);
+  if (!res.ok) {
+    const err = new Error(data?.error || `通信エラー（${res.status}）`);
+    err.status = res.status; // 403（締切後）などを見分けられるようにしておく
+    throw err;
+  }
   return data;
 }
 
@@ -100,27 +104,24 @@ function formatPeriod(period) {
   return `${y}年${m}月`;
 }
 
-// 月の選択肢（今月・来月・再来月）。初期値は来月
-function periodChoices() {
-  const now = new Date();
-  const list = [];
-  for (let i = 0; i < 3; i++) {
-    const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
-    list.push(toPeriod(d.getFullYear(), d.getMonth() + 1));
-  }
-  return { list, initial: list[1] };
-}
-
-function fillPeriodSelect(select) {
-  const { list, initial } = periodChoices();
+// 月の選択肢を作る。サーバーから受け取った
+// { periods: [{ period, deadline, open }], initial } を使う
+function fillPeriodSelect(select, { periods, initial }) {
   select.innerHTML = "";
-  for (const p of list) {
+  for (const p of periods) {
     const opt = document.createElement("option");
-    opt.value = p;
-    opt.textContent = formatPeriod(p);
+    opt.value = p.period;
+    opt.textContent = formatPeriod(p.period) + (p.open ? "" : "（締切済み）");
     select.append(opt);
   }
   select.value = initial;
+}
+
+// データベースの時刻（世界標準時）を日本時間の "12/3 18:40" にする
+function formatUpdated(utc) {
+  if (!utc) return "";
+  const d = new Date(utc.replace(" ", "T") + "Z");
+  return `${d.getMonth() + 1}/${d.getDate()} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 }
 
 // "17:00" と "22:00" → "17:00〜22:00"（終了が空なら "17:00〜"）

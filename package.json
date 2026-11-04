@@ -5,7 +5,7 @@
   "description": "アルバイトのシフト希望の提出・シフト作成・公開をオンラインで行うアプリ",
   "scripts": {
     "dev": "wrangler dev",
-    "db:init:local": "wrangler d1 execute shift-app-db --local --file=./migrations/0001_init.sql",
+    "db:init:local": "wrangler d1 migrations apply shift-app-db --local",
     "deploy": "wrangler deploy"
   },
   "devDependencies": {

@@ -161,6 +161,13 @@ button.primary {
   padding: 14px;
 }
 
+button.secondary {
+  width: 100%;
+  margin-top: 10px;
+  padding: 12px;
+  background: transparent;
+}
+
 button:disabled {
   opacity: 0.6;
   cursor: default;
@@ -182,6 +189,139 @@ button:disabled {
 
 [hidden] {
   display: none !important;
+}
+
+/* 一番上に出すお知らせ */
+.message.flash {
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  border: 1px solid currentColor;
+  background: var(--card);
+}
+
+/* 締切の表示 */
+.deadline {
+  margin: 10px 0 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.deadline.closed {
+  color: var(--danger);
+}
+
+/* ---------- 完了画面 ---------- */
+.done-banner {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  border-color: var(--ok);
+}
+
+.done-banner h2 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.done-icon {
+  flex: 0 0 auto;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--ok);
+  color: var(--card);
+  font-size: 1.4rem;
+  font-weight: 700;
+}
+
+.summary {
+  display: grid;
+  grid-template-columns: 6em 1fr;
+  gap: 6px 10px;
+  margin: 0 0 12px;
+  font-size: 0.9rem;
+}
+
+.summary dt {
+  color: var(--muted);
+}
+
+.summary dd {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.summary-days {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--line);
+}
+
+.summary-days li {
+  display: grid;
+  grid-template-columns: 6em 1.5em 1fr;
+  gap: 6px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.9rem;
+}
+
+/* ---------- 変更の申請 ---------- */
+#my-requests {
+  margin-top: 14px;
+}
+
+.request-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.request-list li {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.request-list li:last-child {
+  border-bottom: none;
+}
+
+.request-head {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+
+.request-body {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.9rem;
+}
+
+.status-open,
+.status-done {
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.status-open {
+  background: var(--maybe-bg);
+  color: var(--maybe);
+}
+
+.status-done {
+  background: var(--ok-bg);
+  color: var(--ok);
 }
 
 /* ---------- カレンダー（提出画面） ---------- */

@@ -1,5 +1,11 @@
 // =========================================================
 // シフト希望の提出画面の動き
+//
+// この画面は、状況によって4つの表示を切り替える
+//   form    : 入力画面（まだ出していない／修正中）
+//   done    : 提出済み（完了）画面
+//   closed  : 締切を過ぎていて、まだ出していない人向けの画面
+//   request : 締切後の「変更の申請」を書く画面
 // =========================================================
 
 const KEY_NAME = "shiftapp.key"; // 合言葉を覚えておく場所の名前
@@ -12,9 +18,15 @@ const els = {
   keyInput: $("key-input"),
   keyButton: $("key-button"),
   keyMessage: $("key-message"),
-  form: $("form"),
+  app: $("app"),
   staffSelect: $("staff-select"),
   periodSelect: $("period-select"),
+  deadlineInfo: $("deadline-info"),
+  flash: $("flash"),
+  loading: $("loading"),
+  pickName: $("pick-name"),
+  // 入力画面
+  formView: $("form-view"),
   defaultStart: $("default-start"),
   defaultEnd: $("default-end"),
   calendar: $("calendar"),
@@ -24,12 +36,35 @@ const els = {
   maxDays: $("max-days"),
   note: $("note"),
   submitButton: $("submit-button"),
+  cancelEditButton: $("cancel-edit-button"),
   formMessage: $("form-message"),
+  // 完了画面
+  doneView: $("done-view"),
+  doneTitle: $("done-title"),
+  doneUpdated: $("done-updated"),
+  summary: $("summary"),
+  summaryDays: $("summary-days"),
+  editButton: $("edit-button"),
+  requestButtonDone: $("request-button-done"),
+  // 締切後・未提出
+  closedView: $("closed-view"),
+  closedText: $("closed-text"),
+  requestButtonClosed: $("request-button-closed"),
+  // 変更の申請
+  requestView: $("request-view"),
+  requestMessage: $("request-message"),
+  requestSend: $("request-send"),
+  requestCancel: $("request-cancel"),
+  requestMessageArea: $("request-message-area"),
+  myRequests: $("my-requests"),
+  myRequestsList: $("my-requests-list"),
 };
 
 // 画面の状態
 let accessKey = loadKey(KEY_NAME);
-// 選んだ日： "2026-12-03" → { status: "ok" | "maybe", start_time, end_time }
+let periodList = []; // サーバーから受け取った月ごとの締切情報
+let current = null; // 今選んでいる人・月の { submission, change_requests, period_info, can_edit }
+// 入力中の日： "2026-12-03" → { status: "ok" | "maybe", start_time, end_time }
 let days = new Map();
 
 // ---------------------------------------------------------
@@ -38,7 +73,6 @@ let days = new Map();
 init();
 
 async function init() {
-  fillPeriodSelect(els.periodSelect);
   fillDaysSelect(els.minDays, "以上");
   fillDaysSelect(els.maxDays, "まで");
 
@@ -50,7 +84,19 @@ async function init() {
   els.periodSelect.addEventListener("change", onTargetChanged);
   els.defaultStart.addEventListener("input", renderDayList);
   els.defaultEnd.addEventListener("input", renderDayList);
-  els.form.addEventListener("submit", onSubmit);
+  els.formView.addEventListener("submit", onSubmit);
+  els.cancelEditButton.addEventListener("click", () => showView("done"));
+  els.editButton.addEventListener("click", startEditing);
+  els.requestButtonDone.addEventListener("click", startRequest);
+  els.requestButtonClosed.addEventListener("click", startRequest);
+  els.requestView.addEventListener("submit", onSendRequest);
+  els.requestCancel.addEventListener("click", decideView);
+
+  // ブラウザの「戻る」「進む」で古い画面がそのまま出てこないよう、
+  // キャッシュから表示されたときは読み込み直す
+  window.addEventListener("pageshow", (e) => {
+    if (e.persisted) location.reload();
+  });
 
   if (accessKey) {
     await start();
@@ -59,13 +105,18 @@ async function init() {
   }
 }
 
-// 合言葉が正しければスタッフ一覧を読み込んでフォームを表示する
+// 合言葉が正しければ、月の一覧とスタッフ一覧を読み込んで画面を出す
 async function start() {
   try {
-    const { staff } = await api("/api/staff", { key: accessKey });
-    fillStaffSelect(staff);
+    const [periodsData, staffData] = await Promise.all([
+      api("/api/periods", { key: accessKey }),
+      api("/api/staff", { key: accessKey }),
+    ]);
+    periodList = periodsData.periods;
+    fillPeriodSelect(els.periodSelect, periodsData);
+    fillStaffSelect(staffData.staff);
     els.keySection.hidden = true;
-    els.form.hidden = false;
+    els.app.hidden = false;
     await onTargetChanged();
   } catch (err) {
     if (err instanceof AuthError) {
@@ -79,7 +130,7 @@ async function start() {
 }
 
 function showKeySection(message = "") {
-  els.form.hidden = true;
+  els.app.hidden = true;
   els.keySection.hidden = false;
   els.keyMessage.textContent = message;
   els.keyInput.focus();
@@ -122,59 +173,186 @@ function fillDaysSelect(select, suffix) {
 }
 
 // ---------------------------------------------------------
-// 名前か月が変わったら、前に出した内容を読み込む
+// 名前か月が変わったら、その人・その月の状況を読み込む
 // ---------------------------------------------------------
 async function onTargetChanged() {
-  setMessage("");
+  hideFlash();
+  renderDeadlineInfo();
+
   const staffId = els.staffSelect.value;
-  if (staffId) saveKey(STAFF_NAME, staffId);
-
-  resetForm();
-  if (staffId) {
-    try {
-      const { submission } = await api(
-        `/api/submission?staff_id=${staffId}&period=${els.periodSelect.value}`,
-        { key: accessKey }
-      );
-      if (submission) {
-        applySubmission(submission);
-        setMessage(`前回の提出内容を表示しています（${formatUpdated(submission.updated_at)}）`);
-      }
-    } catch (err) {
-      setMessage(err.message, "error");
-    }
+  if (!staffId) {
+    current = null;
+    showView(null);
+    els.pickName.hidden = false;
+    return;
   }
-  renderCalendar();
-  renderDayList();
+  saveKey(STAFF_NAME, staffId);
+  await refresh();
 }
 
-function resetForm() {
+// サーバーから最新の状況を読み込んで、表示を決め直す
+async function refresh() {
+  els.pickName.hidden = true;
+  els.loading.hidden = false;
+  showView(null);
+  try {
+    current = await api(
+      `/api/submission?staff_id=${els.staffSelect.value}&period=${els.periodSelect.value}`,
+      { key: accessKey }
+    );
+    decideView();
+  } catch (err) {
+    if (err instanceof AuthError) {
+      clearKey(KEY_NAME);
+      accessKey = "";
+      showKeySection(err.message);
+    } else {
+      showFlash(err.message, "error");
+    }
+  } finally {
+    els.loading.hidden = true;
+  }
+}
+
+// 状況に合わせて、どの画面を出すか決める
+function decideView() {
+  if (!current) return;
+  renderMyRequests();
+  if (current.submission) {
+    renderDone();
+    showView("done");
+  } else if (current.can_edit) {
+    loadIntoForm(null);
+    showView("form");
+  } else {
+    els.closedText.textContent = `${formatPeriod(els.periodSelect.value)}分の提出期限（${current.period_info.deadline}）を過ぎているため、ここからは提出できません。入れる日がある場合は、変更の申請で作成担当に伝えてください。`;
+    showView("closed");
+  }
+}
+
+// 画面の切り替え（name が null なら全部隠す）
+function showView(name) {
+  els.formView.hidden = name !== "form";
+  els.doneView.hidden = name !== "done";
+  els.closedView.hidden = name !== "closed";
+  els.requestView.hidden = name !== "request";
+  // 自分の申請一覧は、完了画面と締切後の画面のときだけ出す
+  els.myRequests.hidden =
+    !(name === "done" || name === "closed") || !current?.change_requests?.length;
+}
+
+function renderDeadlineInfo() {
+  const info = periodList.find((p) => p.period === els.periodSelect.value);
+  if (!info) {
+    els.deadlineInfo.textContent = "";
+    return;
+  }
+  els.deadlineInfo.textContent = info.open
+    ? `提出期限：${info.deadline}まで`
+    : `提出期限：${info.deadline}（締切済み）`;
+  els.deadlineInfo.classList.toggle("closed", !info.open);
+}
+
+// ---------------------------------------------------------
+// 完了画面
+// ---------------------------------------------------------
+function renderDone() {
+  const sub = current.submission;
+  els.doneTitle.textContent = "提出済みです";
+  els.doneUpdated.textContent = `最終更新：${formatUpdated(sub.updated_at)}`;
+
+  const rows = [
+    ["対象の月", formatPeriod(sub.period)],
+    ["基本の時間", formatRange(sub.default_start, sub.default_end) || "指定なし"],
+    ["週の日数", weeklyText(sub)],
+    ["備考", sub.note || "なし"],
+  ];
+  els.summary.innerHTML = rows
+    .map(([k, v]) => `<dt>${k}</dt><dd>${escapeHtml(v)}</dd>`)
+    .join("");
+
+  if (sub.days.length === 0) {
+    els.summaryDays.innerHTML = "<li>入れる日はありません</li>";
+  } else {
+    els.summaryDays.innerHTML = sub.days
+      .map((d) => {
+        const mark =
+          d.status === "ok"
+            ? '<span class="badge-ok">○</span>'
+            : '<span class="badge-maybe">△</span>';
+        const time = formatRange(d.start_time, d.end_time);
+        return `<li><span>${formatDate(d.date)}</span>${mark}<span class="hint" style="margin:0">${escapeHtml(time)}</span></li>`;
+      })
+      .join("");
+  }
+
+  // 締切前（または管理用の合言葉）なら修正、締切後なら申請
+  els.editButton.hidden = !current.can_edit;
+  els.requestButtonDone.hidden = current.can_edit;
+}
+
+function weeklyText(sub) {
+  const min = sub.min_days_per_week;
+  const max = sub.max_days_per_week;
+  if (min && max) return min === max ? `週${min}日` : `週${min}〜${max}日`;
+  if (min) return `週${min}日以上`;
+  if (max) return `週${max}日まで`;
+  return "指定なし";
+}
+
+// 自分が出した変更申請の一覧
+function renderMyRequests() {
+  const list = current?.change_requests ?? [];
+  els.myRequestsList.innerHTML = list
+    .map(
+      (r) => `<li>
+        <div class="request-head">
+          <span class="${r.status === "done" ? "status-done" : "status-open"}">${
+            r.status === "done" ? "対応済み" : "未対応"
+          }</span>
+          <span class="hint" style="margin:0">${escapeHtml(formatUpdated(r.created_at))}</span>
+        </div>
+        <div class="request-body">${escapeHtml(r.message)}</div>
+      </li>`
+    )
+    .join("");
+}
+
+// 「内容を修正する」を押したとき
+function startEditing() {
+  hideFlash();
+  loadIntoForm(current.submission);
+  showView("form");
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+// ---------------------------------------------------------
+// 入力画面
+// ---------------------------------------------------------
+
+// 入力欄に内容を入れる（sub が null なら空の状態にする）
+function loadIntoForm(sub) {
+  setFormMessage("");
   days = new Map();
-  els.defaultStart.value = "17:00";
-  els.defaultEnd.value = "";
-  els.minDays.value = "";
-  els.maxDays.value = "";
-  els.note.value = "";
-}
-
-function applySubmission(sub) {
-  els.defaultStart.value = sub.default_start ?? "";
-  els.defaultEnd.value = sub.default_end ?? "";
-  els.minDays.value = sub.min_days_per_week ?? "";
-  els.maxDays.value = sub.max_days_per_week ?? "";
-  els.note.value = sub.note ?? "";
-  for (const d of sub.days) {
+  els.defaultStart.value = sub ? sub.default_start ?? "" : "17:00";
+  els.defaultEnd.value = sub?.default_end ?? "";
+  els.minDays.value = sub?.min_days_per_week ?? "";
+  els.maxDays.value = sub?.max_days_per_week ?? "";
+  els.note.value = sub?.note ?? "";
+  for (const d of sub?.days ?? []) {
     days.set(d.date, {
       status: d.status,
       start_time: d.start_time ?? "",
       end_time: d.end_time ?? "",
     });
   }
+  // 修正中のときだけ「修正をやめる」を出す
+  els.cancelEditButton.hidden = !sub;
+  els.submitButton.textContent = sub ? "修正して送信する" : "この内容で送信する";
+  renderCalendar();
+  renderDayList();
 }
 
-// ---------------------------------------------------------
-// カレンダー
-// ---------------------------------------------------------
 function renderCalendar() {
   const period = els.periodSelect.value;
   els.calendar.innerHTML = "";
@@ -213,11 +391,11 @@ function renderCalendar() {
 
 // タップするたびに 空欄 → ○ → △ → 空欄 と切り替える
 function toggleDay(date) {
-  const current = days.get(date);
-  if (!current) {
+  const now = days.get(date);
+  if (!now) {
     days.set(date, { status: "ok", start_time: "", end_time: "" });
-  } else if (current.status === "ok") {
-    current.status = "maybe";
+  } else if (now.status === "ok") {
+    now.status = "maybe";
   } else {
     days.delete(date);
   }
@@ -231,9 +409,7 @@ function statusLabel(status) {
   return "入れない";
 }
 
-// ---------------------------------------------------------
 // 選んだ日ごとの時間
-// ---------------------------------------------------------
 function renderDayList() {
   const sorted = [...days.keys()].sort();
   els.dayListCard.hidden = sorted.length === 0;
@@ -266,17 +442,10 @@ function renderDayList() {
   }
 }
 
-// ---------------------------------------------------------
 // 送信
-// ---------------------------------------------------------
 async function onSubmit(event) {
   event.preventDefault(); // ページが再読み込みされないようにする
-  setMessage("");
-
-  if (!els.staffSelect.value) {
-    setMessage("名前を選んでください", "error");
-    return;
-  }
+  setFormMessage("");
 
   const body = {
     staff_id: Number(els.staffSelect.value),
@@ -286,29 +455,32 @@ async function onSubmit(event) {
     min_days_per_week: els.minDays.value ? Number(els.minDays.value) : null,
     max_days_per_week: els.maxDays.value ? Number(els.maxDays.value) : null,
     note: els.note.value.trim(),
-    days: [...days.entries()].sort().map(([date, d]) => ({
+    days: [...days.keys()].sort().map((date) => ({
       date,
-      status: d.status,
-      start_time: d.start_time,
-      end_time: d.end_time,
+      status: days.get(date).status,
+      start_time: days.get(date).start_time,
+      end_time: days.get(date).end_time,
     })),
   };
 
   els.submitButton.disabled = true;
   try {
     await api("/api/submission", { method: "POST", body, key: accessKey });
-    const count = body.days.length;
-    setMessage(
-      `送信しました！（${formatPeriod(body.period)}・${count}日分）出し直すときはこの画面からもう一度送信してください。`,
-      "success"
-    );
+    // 送信できたら完了画面に切り替える
+    await refresh();
+    els.doneTitle.textContent = "提出しました！";
+    window.scrollTo({ top: 0, behavior: "smooth" });
   } catch (err) {
     if (err instanceof AuthError) {
       clearKey(KEY_NAME);
       accessKey = "";
       showKeySection(err.message);
+    } else if (err.status === 403) {
+      // 入力している間に締切を過ぎた場合など
+      await refresh();
+      showFlash(err.message, "error");
     } else {
-      setMessage(err.message, "error");
+      setFormMessage(err.message, "error");
     }
   } finally {
     els.submitButton.disabled = false;
@@ -316,16 +488,57 @@ async function onSubmit(event) {
 }
 
 // ---------------------------------------------------------
-// ちょっとした表示用の処理
+// 変更の申請
 // ---------------------------------------------------------
-function setMessage(text, type = "") {
+function startRequest() {
+  hideFlash();
+  els.requestMessage.value = "";
+  els.requestMessageArea.textContent = "";
+  showView("request");
+  els.requestMessage.focus();
+}
+
+async function onSendRequest(event) {
+  event.preventDefault();
+  const message = els.requestMessage.value.trim();
+  if (!message) {
+    els.requestMessageArea.textContent = "変更したい内容を書いてください";
+    els.requestMessageArea.className = "message error";
+    return;
+  }
+
+  els.requestSend.disabled = true;
+  try {
+    await api("/api/change-request", {
+      method: "POST",
+      body: { staff_id: Number(els.staffSelect.value), period: els.periodSelect.value, message },
+      key: accessKey,
+    });
+    await refresh();
+    showFlash("申請を送りました。作成担当が確認します。");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  } catch (err) {
+    els.requestMessageArea.textContent = err.message;
+    els.requestMessageArea.className = "message error";
+  } finally {
+    els.requestSend.disabled = false;
+  }
+}
+
+// ---------------------------------------------------------
+// メッセージ表示
+// ---------------------------------------------------------
+function setFormMessage(text, type = "") {
   els.formMessage.textContent = text;
   els.formMessage.className = "message" + (type ? ` ${type}` : "");
 }
 
-// データベースの時刻（UTC）を日本時間の "12/3 18:40" にする
-function formatUpdated(utc) {
-  if (!utc) return "";
-  const d = new Date(utc.replace(" ", "T") + "Z");
-  return `${d.getMonth() + 1}/${d.getDate()} ${pad2(d.getHours())}:${pad2(d.getMinutes())}更新`;
+function showFlash(text, type = "success") {
+  els.flash.textContent = text;
+  els.flash.className = `message flash ${type}`;
+  els.flash.hidden = false;
+}
+
+function hideFlash() {
+  els.flash.hidden = true;
 }

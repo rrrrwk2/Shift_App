@@ -9,7 +9,7 @@
   <body>
     <header>
       <h1>シフト希望の提出</h1>
-      <p>入れる日をタップして、送信してください。何度でも出し直せます。</p>
+      <p>入れる日をタップして送信してください。提出期限までは修正できます。</p>
     </header>
 
     <main>
@@ -24,55 +24,108 @@
         <div id="key-message" class="message error"></div>
       </section>
 
-      <!-- 提出フォーム -->
-      <form id="form" hidden>
+      <div id="app" hidden>
+        <!-- 名前と月（どの画面でも上に出す） -->
         <section class="card">
           <label for="staff-select">名前</label>
           <select id="staff-select"></select>
           <div style="height: 12px"></div>
           <label for="period-select">対象の月</label>
           <select id="period-select"></select>
+          <p id="deadline-info" class="deadline"></p>
         </section>
 
-        <section class="card">
-          <h2>基本の時間</h2>
-          <p class="hint">日ごとに時間を書かなかった日は、この時間で入れる扱いになります。終わりは空欄ならラストまで。</p>
-          <div class="row">
-            <input id="default-start" type="time" value="17:00" aria-label="開始" />
-            <span class="sep">〜</span>
-            <input id="default-end" type="time" aria-label="終了" />
+        <div id="flash" class="message success" hidden></div>
+        <div id="loading" class="hint" hidden>読み込み中…</div>
+        <div id="pick-name" class="hint" hidden>まず名前を選んでください。</div>
+
+        <!-- ===== 入力画面 ===== -->
+        <form id="form-view" hidden>
+          <section class="card">
+            <h2>基本の時間</h2>
+            <p class="hint">日ごとに時間を書かなかった日は、この時間で入れる扱いになります。終わりは空欄ならラストまで。</p>
+            <div class="row">
+              <input id="default-start" type="time" value="17:00" aria-label="開始" />
+              <span class="sep">〜</span>
+              <input id="default-end" type="time" aria-label="終了" />
+            </div>
+          </section>
+
+          <section class="card">
+            <h2>入れる日</h2>
+            <p class="hint">タップするたびに「○（入れる）→ △（相談可）→ 空欄」と切り替わります。</p>
+            <div id="calendar" class="calendar"></div>
+          </section>
+
+          <section class="card" id="day-list-card" hidden>
+            <h2>日ごとの時間（変えたい日だけ）</h2>
+            <p class="hint">空欄の日は基本の時間になります。</p>
+            <ul id="day-list" class="day-list"></ul>
+          </section>
+
+          <section class="card">
+            <h2>週に入りたい日数</h2>
+            <div class="row">
+              <select id="min-days" aria-label="週の最低日数"></select>
+              <span class="sep">〜</span>
+              <select id="max-days" aria-label="週の最大日数"></select>
+            </div>
+          </section>
+
+          <section class="card">
+            <label for="note">備考（任意）</label>
+            <textarea id="note" maxlength="500" placeholder="例：テスト期間の12/10〜12/14は早上がり希望"></textarea>
+          </section>
+
+          <button id="submit-button" class="primary" type="submit">この内容で送信する</button>
+          <button id="cancel-edit-button" class="secondary" type="button" hidden>修正をやめる</button>
+          <div id="form-message" class="message"></div>
+        </form>
+
+        <!-- ===== 提出済み（完了）画面 ===== -->
+        <section id="done-view" hidden>
+          <div class="card done-banner">
+            <div class="done-icon" aria-hidden="true">✓</div>
+            <div>
+              <h2 id="done-title">提出済みです</h2>
+              <p id="done-updated" class="hint" style="margin: 0"></p>
+            </div>
           </div>
+
+          <section class="card">
+            <h2>提出した内容</h2>
+            <dl id="summary" class="summary"></dl>
+            <ul id="summary-days" class="summary-days"></ul>
+          </section>
+
+          <button id="edit-button" class="primary" type="button" hidden>内容を修正する</button>
+          <button id="request-button-done" class="primary" type="button" hidden>変更を申請する</button>
         </section>
 
-        <section class="card">
-          <h2>入れる日</h2>
-          <p class="hint">タップするたびに「○（入れる）→ △（相談可）→ 空欄」と切り替わります。</p>
-          <div id="calendar" class="calendar"></div>
+        <!-- ===== 締切後・未提出の画面 ===== -->
+        <section id="closed-view" class="card" hidden>
+          <h2>提出期限を過ぎています</h2>
+          <p class="hint" id="closed-text"></p>
+          <button id="request-button-closed" class="primary" type="button">変更を申請する</button>
         </section>
 
-        <section class="card" id="day-list-card" hidden>
-          <h2>日ごとの時間（変えたい日だけ）</h2>
-          <p class="hint">空欄の日は基本の時間になります。</p>
-          <ul id="day-list" class="day-list"></ul>
-        </section>
+        <!-- ===== 変更の申請画面 ===== -->
+        <form id="request-view" class="card" hidden>
+          <h2>変更の申請</h2>
+          <p class="hint">提出期限を過ぎたので、ここから作成担当に変更をお願いできます。どの日をどう変えたいか書いてください。</p>
+          <textarea id="request-message" maxlength="500" placeholder="例：12/10（木）は入れなくなりました。代わりに12/12（土）なら入れます。"></textarea>
+          <div style="height: 12px"></div>
+          <button id="request-send" class="primary" type="submit">申請を送る</button>
+          <button id="request-cancel" class="secondary" type="button">やめる</button>
+          <div id="request-message-area" class="message"></div>
+        </form>
 
-        <section class="card">
-          <h2>週に入りたい日数</h2>
-          <div class="row">
-            <select id="min-days" aria-label="週の最低日数"></select>
-            <span class="sep">〜</span>
-            <select id="max-days" aria-label="週の最大日数"></select>
-          </div>
+        <!-- 自分の変更申請（あれば） -->
+        <section id="my-requests" class="card" hidden>
+          <h2>変更の申請</h2>
+          <ul id="my-requests-list" class="request-list"></ul>
         </section>
-
-        <section class="card">
-          <label for="note">備考（任意）</label>
-          <textarea id="note" maxlength="500" placeholder="例：テスト期間の12/10〜12/14は早上がり希望"></textarea>
-        </section>
-
-        <button id="submit-button" class="primary" type="submit">この内容で送信する</button>
-        <div id="form-message" class="message"></div>
-      </form>
+      </div>
     </main>
 
     <script src="common.js"></script>
