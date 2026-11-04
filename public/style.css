@@ -4,10 +4,10 @@
 
 /* 色やサイズは最初にまとめて決めておく（あとで変えやすいように） */
 :root {
-  --bg: #ffffff;
+  --bg: #ffffff6b;
   --card: #ffffff;
   --text: #1f2328;
-  --muted: #acb3c0;
+  --muted: #ffffff;
   --line: #e2e0db;
   --accent: #2f6f5e;
   --accent-text: #ffffff;
