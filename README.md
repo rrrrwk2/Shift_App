@@ -99,6 +99,13 @@ wrangler.jsonc     Cloudflareの設定
 4. LIFF IDとチャネルIDを `wrangler.jsonc` の `vars` に書く
 5. LINE公式アカウントのリッチメニューに、ミニアプリのURLを開くボタンを置く
 
+## 提出のお願い（LINEでの自動リマインド）
+
+- 毎日12:00（日本時間）にCloudflareの定期実行（Cron Trigger）が動き、12日（締切3日前）と14日（前日）なら、翌月分を**まだ提出していないLINE連携済みの人だけ**にLINEで送る
+- 同じ月・同じ種類は1回だけ（送信記録 `reminder_log` で二重送信を防ぐ）
+- 一覧画面から「未提出の人に今すぐ送る」もできる
+- 設定：LINE Official Account Managerで Messaging API を有効にし（プロバイダーはミニアプリと同じものを選ぶ）、LINE Developersで長期のチャネルアクセストークンを発行して、Cloudflareのシークレット `LINE_MESSAGING_TOKEN` に入れる
+
 ## 手元で動かす場合
 
 ```

@@ -16,8 +16,18 @@ const DEADLINE_DAY = 15;
 
 // LINEのIDトークンを確認するためのLINEの窓口
 const LINE_VERIFY_URL = "https://api.line.me/oauth2/v2.1/verify";
+// LINEでメッセージを送るための窓口
+const LINE_API_BASE = "https://api.line.me";
+
+// 締切の何日前にリマインドを送るか： 日数 → 記録に使う名前
+const REMINDER_DAYS = { 3: "3days", 1: "1day" };
 
 export default {
+  // 決まった時刻にCloudflareが自動で呼ぶ関数（wrangler.jsonc の triggers で毎日12:00に設定）
+  async scheduled(controller, env, ctx) {
+    ctx.waitUntil(runDailyReminder(env, new Date(controller.scheduledTime)));
+  },
+
   // ブラウザからリクエストが来るたびに、この関数が呼ばれる
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -75,6 +85,9 @@ async function handleApi(request, env, url) {
     }
     if (path === "/api/admin/change-request/status" && method === "POST") {
       return setChangeRequestStatus(env, await readJson(request));
+    }
+    if (path === "/api/admin/remind" && method === "POST") {
+      return sendManualReminder(env, await readJson(request));
     }
     return json({ error: "見つかりません" }, 404);
   }
@@ -384,7 +397,7 @@ async function listSubmissions(env, url) {
   const period = url.searchParams.get("period") ?? "";
   if (!isPeriod(period)) return json({ error: "月の指定が正しくありません" }, 400);
 
-  const [staffRes, subRes, dayRes, reqRes] = await env.DB.batch([
+  const [staffRes, subRes, dayRes, reqRes, remindRes] = await env.DB.batch([
     env.DB.prepare(
       `SELECT id, name, line_name, line_user_id IS NOT NULL AS linked
          FROM staff WHERE active = 1 ORDER BY id`
@@ -404,6 +417,9 @@ async function listSubmissions(env, url) {
         WHERE r.period = ?
         ORDER BY r.status = 'done', r.id DESC`
     ).bind(period),
+    env.DB.prepare(
+      "SELECT kind, recipients, sent_at FROM reminder_log WHERE period = ? ORDER BY id DESC"
+    ).bind(period),
   ]);
 
   // 提出ごとに日ごとの希望をまとめる
@@ -416,8 +432,117 @@ async function listSubmissions(env, url) {
     staff: staffRes.results,
     submissions,
     change_requests: reqRes.results,
+    reminders: remindRes.results,
+    reminder_ready: Boolean(env.LINE_MESSAGING_TOKEN), // LINEで送る準備ができているか
     period_info: periodInfo(period),
   });
+}
+
+// =========================================================
+// 提出のお願い（リマインド）をLINEで送る
+// =========================================================
+
+// その日にどのリマインドを送るべきかを決める（送らない日は null）
+// 例）11月12日 → 12月分の締切（11月15日）の3日前なので { period: "2026-12", daysLeft: 3, kind: "3days" }
+export function reminderPlan(now) {
+  const jst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+  const daysLeft = DEADLINE_DAY - jst.getUTCDate();
+  const kind = REMINDER_DAYS[daysLeft];
+  if (!kind) return null;
+
+  // 今月15日が締切なのは「翌月分」
+  const next = new Date(Date.UTC(jst.getUTCFullYear(), jst.getUTCMonth() + 1, 1));
+  const period = `${next.getUTCFullYear()}-${String(next.getUTCMonth() + 1).padStart(2, "0")}`;
+  return { period, daysLeft, kind };
+}
+
+// 毎日の定期実行で呼ばれる
+async function runDailyReminder(env, now) {
+  const plan = reminderPlan(now);
+  if (!plan) return; // 今日は送る日ではない
+  if (!env.LINE_MESSAGING_TOKEN) {
+    console.log("LINE_MESSAGING_TOKEN が未設定なので、リマインドを送りませんでした");
+    return;
+  }
+
+  // 先に記録を入れてみて、もう入っていたら（＝今日すでに送った）何もしない
+  const log = await env.DB.prepare(
+    `INSERT INTO reminder_log (period, kind) VALUES (?, ?)
+     ON CONFLICT DO NOTHING RETURNING id`
+  )
+    .bind(plan.period, plan.kind)
+    .first();
+  if (!log) return;
+
+  try {
+    const count = await remindUnsubmitted(env, plan.period, plan.daysLeft);
+    await env.DB.prepare("UPDATE reminder_log SET recipients = ? WHERE id = ?")
+      .bind(count, log.id)
+      .run();
+  } catch (err) {
+    // 送れなかったら記録を消しておく（作成担当が手動で送り直せるように）
+    console.error(err);
+    await env.DB.prepare("DELETE FROM reminder_log WHERE id = ?").bind(log.id).run();
+  }
+}
+
+// 管理者用：今すぐ未提出の人に送る
+async function sendManualReminder(env, body) {
+  const period = body?.period;
+  if (!isPeriod(period)) return json({ error: "月の指定が正しくありません" }, 400);
+  if (isClosed(period)) return json({ error: "この月はもう締め切られています" }, 400);
+  if (!env.LINE_MESSAGING_TOKEN) {
+    return json({ error: "LINEで送るための設定（LINE_MESSAGING_TOKEN）がまだです" }, 503);
+  }
+
+  const daysLeft = Math.ceil((deadlineOf(period).getTime() - Date.now()) / (24 * 60 * 60 * 1000));
+  const count = await remindUnsubmitted(env, period, daysLeft);
+  await env.DB.prepare("INSERT INTO reminder_log (period, kind, recipients) VALUES (?, 'manual', ?)")
+    .bind(period, count)
+    .run();
+  return json({ ok: true, recipients: count });
+}
+
+// まだ提出していない人（LINE連携済みの人だけ）にお願いを送り、送った人数を返す
+async function remindUnsubmitted(env, period, daysLeft) {
+  const { results } = await env.DB.prepare(
+    `SELECT line_user_id FROM staff
+      WHERE active = 1 AND line_user_id IS NOT NULL
+        AND id NOT IN (SELECT staff_id FROM submissions WHERE period = ?)`
+  )
+    .bind(period)
+    .all();
+  const userIds = results.map((r) => r.line_user_id);
+  if (userIds.length === 0) return 0;
+
+  const [, month] = period.split("-").map(Number);
+  const when = daysLeft <= 1 ? "明日" : `あと${daysLeft}日`;
+  const text =
+    `【シフト提出のお願い】\n` +
+    `${month}月分のシフト希望の提出期限は ${deadlineText(period)} です（${when}）。\n` +
+    `まだ提出していない人は、メニューの「シフト提出」か、下のリンクから出してください。\n` +
+    (env.LIFF_ID ? `https://miniapp.line.me/${env.LIFF_ID}` : "");
+
+  // LINEのマルチキャストは1回に500人まで
+  for (let i = 0; i < userIds.length; i += 500) {
+    const res = await fetch(`${env.LINE_API_BASE || LINE_API_BASE}/v2/bot/message/multicast`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${env.LINE_MESSAGING_TOKEN}`,
+        // 通信が途中で切れて送り直したときに、二重に届かないようにするための番号
+        "X-Line-Retry-Key": crypto.randomUUID(),
+      },
+      body: JSON.stringify({
+        to: userIds.slice(i, i + 500),
+        messages: [{ type: "text", text: text.trim() }],
+      }),
+    });
+    if (!res.ok) {
+      throw new Error(`LINEへの送信に失敗しました（${res.status}）: ${await res.text()}`);
+    }
+  }
+  return userIds.length;
 }
 
 // =========================================================

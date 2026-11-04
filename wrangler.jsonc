@@ -33,6 +33,12 @@
     "LINE_CHANNEL_ID": "2012378121"
   },
 
+  // 定期実行：毎日 03:00（世界標準時）＝ 日本時間の12:00 に scheduled() が呼ばれる
+  // 12日・14日なら、未提出の人にLINEで提出のお願いを送る
+  "triggers": {
+    "crons": ["0 3 * * *"]
+  },
+
   // Cloudflareのダッシュボードでログを見られるようにする
   "observability": {
     "enabled": true

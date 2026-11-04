@@ -19,6 +19,10 @@ const els = {
   staffAdd: $("staff-add"),
   staffMessage: $("staff-message"),
   staffList: $("staff-list"),
+  remindHint: $("remind-hint"),
+  remindLog: $("remind-log"),
+  remindButton: $("remind-button"),
+  remindMessage: $("remind-message"),
   requestsCard: $("requests-card"),
   requestsTitle: $("requests-title"),
   requestsList: $("requests-list"),
@@ -36,6 +40,7 @@ async function init() {
   els.periodSelect.addEventListener("change", load);
   els.reloadButton.addEventListener("click", load);
   els.staffAdd.addEventListener("click", onAddStaff);
+  els.remindButton.addEventListener("click", onRemindNow);
   els.staffName.addEventListener("keydown", (e) => {
     if (e.key === "Enter") onAddStaff();
   });
@@ -97,6 +102,7 @@ async function load() {
     const data = await api(`/api/admin/submissions?period=${period}`, { key: adminKey });
     renderGrid(period, data.staff, data.submissions, data.period_info);
     renderRequests(data.change_requests);
+    renderReminders(data);
     renderStaffList(data.staff);
   } catch (err) {
     handleError(err);
@@ -174,6 +180,64 @@ function weeklyText(sub) {
   if (min) return `週${min}日以上`;
   if (max) return `週${max}日まで`;
   return "-";
+}
+
+// ---------------------------------------------------------
+// 提出のお願い（LINEでのリマインド）
+// ---------------------------------------------------------
+const REMIND_LABELS = { "3days": "自動（3日前）", "1day": "自動（前日）", manual: "手動" };
+
+function renderReminders(data) {
+  // まだ提出していない、LINE連携済みの人数（今すぐ送ったときに届く人数）
+  const submitted = new Set(data.submissions.map((s) => s.staff_id));
+  const targets = data.staff.filter((p) => p.linked && !submitted.has(p.id)).length;
+
+  els.remindLog.innerHTML = data.reminders.length
+    ? data.reminders
+        .map(
+          (r) =>
+            `<li><span>${escapeHtml(formatUpdated(r.sent_at))}</span><span>${
+              REMIND_LABELS[r.kind] ?? r.kind
+            }</span><span>${r.recipients}人に送信</span></li>`
+        )
+        .join("")
+    : "<li class='hint' style='margin:0'>この月はまだ送っていません</li>";
+
+  const open = data.period_info.open;
+  els.remindButton.textContent = `未提出の${targets}人に今すぐ送る`;
+  els.remindButton.disabled = !open || !data.reminder_ready || targets === 0;
+  els.remindButton.dataset.targets = targets;
+
+  if (!data.reminder_ready) {
+    setRemindMessage("LINEで送るための設定（LINE_MESSAGING_TOKEN）がまだのため、送信できません", "error");
+  } else if (!open) {
+    setRemindMessage("この月は締め切り済みです");
+  } else {
+    setRemindMessage("");
+  }
+}
+
+async function onRemindNow() {
+  const period = els.periodSelect.value;
+  const targets = els.remindButton.dataset.targets;
+  if (!confirm(`${formatPeriod(period)}分をまだ提出していない${targets}人に、LINEで提出のお願いを送ります。よろしいですか？`)) {
+    return;
+  }
+  els.remindButton.disabled = true;
+  try {
+    const res = await api("/api/admin/remind", { method: "POST", body: { period }, key: adminKey });
+    await load();
+    setRemindMessage(`${res.recipients}人に送りました`, "success");
+  } catch (err) {
+    if (err instanceof AuthError) handleError(err);
+    else setRemindMessage(err.message, "error");
+    els.remindButton.disabled = false;
+  }
+}
+
+function setRemindMessage(text, type = "") {
+  els.remindMessage.textContent = text;
+  els.remindMessage.className = "message" + (type ? ` ${type}` : "");
 }
 
 // ---------------------------------------------------------
