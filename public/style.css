@@ -594,3 +594,16 @@ table.grid td.note {
 .sortable-ghost {
   opacity: 0.4;
 }
+
+/* ---------- 男女の人数・性別の選択 ---------- */
+table.grid tfoot tr.sub-count td {
+  font-weight: 400;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.gender-select {
+  width: auto;
+  padding: 4px 6px;
+  font-size: 0.8rem;
+}

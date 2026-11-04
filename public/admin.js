@@ -124,12 +124,18 @@ function renderGrid(period, staff, submissions, periodInfo) {
   // staff_id → 提出内容 の対応表を作る
   const byStaff = new Map(submissions.map((s) => [s.staff_id, s]));
 
-  // 日ごとの○△の人数を数える
-  const okCount = Object.fromEntries(dates.map((d) => [d, 0]));
-  const maybeCount = Object.fromEntries(dates.map((d) => [d, 0]));
+  // 日ごとに ○△ の人数を、全体・男性・女性に分けて数える
+  //   count.ok.all["2026-12-03"] → その日に○の人の数
+  //   count.ok.male["2026-12-03"] → そのうち男性の数
+  const zero = () => Object.fromEntries(dates.map((d) => [d, 0]));
+  const count = {
+    ok: { all: zero(), male: zero(), female: zero() },
+    maybe: { all: zero(), male: zero(), female: zero() },
+  };
 
   // ---- 見出し ----
-  let html = "<thead><tr><th class='name'>名前</th><th>週の希望</th><th>基本の時間</th>";
+  let html =
+    "<thead><tr><th class='name'>名前</th><th>性別</th><th>週の希望</th><th>基本の時間</th>";
   for (const date of dates) {
     const wd = weekdayOf(date);
     const cls = wd === 0 ? "sun" : wd === 6 ? "sat" : "";
@@ -145,6 +151,7 @@ function renderGrid(period, staff, submissions, periodInfo) {
     const dayMap = new Map((sub?.days ?? []).map((d) => [d.date, d]));
 
     html += `<tr class="${sub ? "" : "unsubmitted"}"><td class="name">${escapeHtml(person.name)}</td>`;
+    html += `<td>${GENDER_SHORT[person.gender] ?? "-"}</td>`;
     html += `<td>${sub ? weeklyText(sub) : "未提出"}</td>`;
     html += `<td>${sub ? escapeHtml(formatRange(sub.default_start, sub.default_end) || "-") : ""}</td>`;
     for (const date of dates) {
@@ -153,8 +160,10 @@ function renderGrid(period, staff, submissions, periodInfo) {
         html += "<td></td>";
         continue;
       }
-      if (d.status === "ok") okCount[date]++;
-      else maybeCount[date]++;
+      const c = count[d.status]; // ○なら count.ok、△なら count.maybe
+      c.all[date]++;
+      if (person.gender === "male") c.male[date]++;
+      if (person.gender === "female") c.female[date]++;
       const mark = d.status === "ok" ? "○" : "△";
       const time = formatRange(d.start_time, d.end_time);
       html += `<td class="${d.status}">${mark}${
@@ -166,19 +175,33 @@ function renderGrid(period, staff, submissions, periodInfo) {
   }
   html += "</tbody>";
 
-  // ---- 合計 ----
-  html += "<tfoot><tr><td class='name'>○の人数</td><td colspan='2'></td>";
-  for (const date of dates) html += `<td>${okCount[date] || ""}</td>`;
-  html += "<td colspan='2'></td></tr><tr><td class='name'>△の人数</td><td colspan='2'></td>";
-  for (const date of dates) html += `<td>${maybeCount[date] || ""}</td>`;
-  html += "<td colspan='2'></td></tr></tfoot>";
+  // ---- 合計（日ごとの人数） ----
+  const footRow = (label, values, cls = "") => {
+    let row = `<tr class="${cls}"><td class='name'>${label}</td><td colspan='3'></td>`;
+    for (const date of dates) row += `<td>${values[date] || ""}</td>`;
+    return row + "<td colspan='2'></td></tr>";
+  };
+  html += "<tfoot>";
+  html += footRow("○の人数", count.ok.all);
+  html += footRow("　うち男性", count.ok.male, "sub-count male");
+  html += footRow("　うち女性", count.ok.female, "sub-count female");
+  html += footRow("△の人数", count.maybe.all);
+  html += footRow("　うち男性", count.maybe.male, "sub-count male");
+  html += footRow("　うち女性", count.maybe.female, "sub-count female");
+  html += "</tfoot>";
 
   els.grid.innerHTML = html;
   const deadline = periodInfo.open
     ? `提出期限 ${periodInfo.deadline}まで`
     : `提出期限 ${periodInfo.deadline}（締切済み）`;
-  els.summary.textContent = `${formatPeriod(period)}：提出済み ${submittedCount} / ${staff.length}人 ・ ${deadline}`;
+  const noGender = staff.filter((p) => !p.gender).length;
+  els.summary.textContent =
+    `${formatPeriod(period)}：提出済み ${submittedCount} / ${staff.length}人 ・ ${deadline}` +
+    (noGender ? ` ・ 性別未設定 ${noGender}人（下の名簿で設定できます）` : "");
 }
+
+// 性別の表示（作成担当だけが見る）
+const GENDER_SHORT = { male: "男", female: "女" };
 
 // 週の日数の希望を文章にする
 function weeklyText(sub) {
@@ -374,6 +397,16 @@ function renderStaffList(staff) {
     const buttons = document.createElement("div");
     buttons.style.display = "flex";
     buttons.style.gap = "6px";
+
+    // 性別（日ごとの男女の人数に使う。スタッフ側の画面には出ない）
+    const gender = document.createElement("select");
+    gender.className = "gender-select";
+    gender.setAttribute("aria-label", `${person.name} さんの性別`);
+    gender.innerHTML =
+      '<option value="">性別</option><option value="male">男性</option><option value="female">女性</option>';
+    gender.value = person.gender ?? "";
+    gender.addEventListener("change", () => onChangeGender(person, gender.value || null));
+    buttons.append(gender);
     if (person.linked) {
       const unlink = document.createElement("button");
       unlink.type = "button";
@@ -418,6 +451,17 @@ function setupSortable() {
       }
     },
   });
+}
+
+// 性別を保存して、一覧表の人数を数え直す
+async function onChangeGender(person, gender) {
+  try {
+    await api("/api/admin/staff/gender", { method: "POST", body: { id: person.id, gender }, key: adminKey });
+    await load();
+  } catch (err) {
+    if (err instanceof AuthError) handleError(err);
+    else setStaffMessage(err.message, "error");
+  }
 }
 
 // 間違ったLINEアカウントと結びついたときに解除する

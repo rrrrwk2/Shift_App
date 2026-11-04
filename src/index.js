@@ -80,6 +80,9 @@ async function handleApi(request, env, url) {
     if (path === "/api/admin/staff/deactivate" && method === "POST") {
       return deactivateStaff(env, await readJson(request));
     }
+    if (path === "/api/admin/staff/gender" && method === "POST") {
+      return setStaffGender(env, await readJson(request));
+    }
     if (path === "/api/admin/staff/order" && method === "POST") {
       return saveStaffOrder(env, await readJson(request));
     }
@@ -288,6 +291,18 @@ async function addStaff(env, body) {
   return json({ staff: row });
 }
 
+// 性別を設定する（作成担当だけ。日ごとの男女の人数を数えるため）
+async function setStaffGender(env, body) {
+  const id = Number(body?.id);
+  const gender = body?.gender ?? null;
+  if (!Number.isInteger(id)) return json({ error: "idが正しくありません" }, 400);
+  if (gender !== null && gender !== "male" && gender !== "female") {
+    return json({ error: "性別の値が正しくありません" }, 400);
+  }
+  await env.DB.prepare("UPDATE staff SET gender = ? WHERE id = ?").bind(gender, id).run();
+  return json({ ok: true });
+}
+
 // 並び順を保存する（ids に上から順番に並べたスタッフのidが入ってくる）
 async function saveStaffOrder(env, body) {
   const ids = body?.ids;
@@ -422,7 +437,7 @@ async function listSubmissions(env, url) {
 
   const [staffRes, subRes, dayRes, reqRes, remindRes] = await env.DB.batch([
     env.DB.prepare(
-      `SELECT id, name, line_name, line_user_id IS NOT NULL AS linked
+      `SELECT id, name, gender, line_name, line_user_id IS NOT NULL AS linked
          FROM staff WHERE active = 1 ORDER BY sort_order, id`
     ),
     env.DB.prepare("SELECT * FROM submissions WHERE period = ?").bind(period),
