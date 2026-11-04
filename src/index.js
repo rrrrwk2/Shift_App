@@ -4,11 +4,18 @@
 // 画面（public フォルダのHTMLなど）はCloudflareがそのまま配信します。
 // このファイルが担当するのは「/api/〜」で始まるURLへのリクエストだけで、
 // データベース（D1）への保存や読み込みをします。
+//
+// 本人確認は2種類：
+//   スタッフ   … LINEのIDトークン（LINEの中で開くと自動で手に入る）
+//   作成担当   … 管理用の合言葉（ADMIN_KEY）
 // =========================================================
 
 // 提出の締切日：対象の月の「前の月」のこの日の23:59（日本時間）まで
 // 例）12月分の希望 → 11月15日 23:59 まで
 const DEADLINE_DAY = 15;
+
+// LINEのIDトークンを確認するためのLINEの窓口
+const LINE_VERIFY_URL = "https://api.line.me/oauth2/v2.1/verify";
 
 export default {
   // ブラウザからリクエストが来るたびに、この関数が呼ばれる
@@ -37,36 +44,23 @@ async function handleApi(request, env, url) {
   const path = url.pathname;
   const method = request.method;
 
-  // 合言葉がCloudflare側にまだ設定されていない場合は、それが分かるように伝える
-  if (!env.ADMIN_KEY) {
-    return json(
-      { error: "サーバーに合言葉（ADMIN_KEY）が設定されていません。Cloudflareの設定を確認してください" },
-      503
-    );
+  // ---- 誰でも見られるもの ----
+  // 画面がLINEにつなぐための設定（LIFF ID）。秘密情報ではない
+  if (path === "/api/config" && method === "GET") {
+    return json({ liff_id: env.LIFF_ID || null });
   }
+  // 月ごとの締切情報
+  if (path === "/api/periods" && method === "GET") return listPeriods();
 
-  // 合言葉から「誰として来たか」を判定する： "admin" / "staff" / null（合言葉が違う）
-  const role = roleOf(request, env);
-  const isAdmin = role === "admin";
-
-  // ---- スタッフ向け（スタッフ用か管理用の合言葉が必要） ----
-  if (path.startsWith("/api/") && !path.startsWith("/api/admin/")) {
-    if (!role) return unauthorized();
-
-    if (path === "/api/periods" && method === "GET") return listPeriods(isAdmin);
-    if (path === "/api/staff" && method === "GET") return listStaff(env);
-    if (path === "/api/submission" && method === "GET") return getSubmission(env, url, isAdmin);
-    if (path === "/api/submission" && method === "POST") {
-      return saveSubmission(env, await readJson(request), isAdmin);
-    }
-    if (path === "/api/change-request" && method === "POST") {
-      return addChangeRequest(env, await readJson(request));
-    }
-  }
-
-  // ---- 作成担当（管理者）向け（管理用の合言葉が必要） ----
+  // ---- 作成担当（管理者）向け：管理用の合言葉が必要 ----
   if (path.startsWith("/api/admin/")) {
-    if (!isAdmin) return unauthorized();
+    if (!env.ADMIN_KEY) {
+      return json(
+        { error: "サーバーに合言葉（ADMIN_KEY）が設定されていません。Cloudflareの設定を確認してください" },
+        503
+      );
+    }
+    if (!isAdminKey(request, env)) return json({ error: "合言葉が違います" }, 401);
 
     if (path === "/api/admin/check" && method === "GET") return json({ ok: true });
     if (path === "/api/admin/submissions" && method === "GET") return listSubmissions(env, url);
@@ -76,12 +70,143 @@ async function handleApi(request, env, url) {
     if (path === "/api/admin/staff/deactivate" && method === "POST") {
       return deactivateStaff(env, await readJson(request));
     }
+    if (path === "/api/admin/staff/unlink" && method === "POST") {
+      return unlinkStaff(env, await readJson(request));
+    }
     if (path === "/api/admin/change-request/status" && method === "POST") {
       return setChangeRequestStatus(env, await readJson(request));
     }
+    return json({ error: "見つかりません" }, 404);
+  }
+
+  // ---- スタッフ向け：LINEでの本人確認が必要 ----
+  if (!env.LINE_CHANNEL_ID) {
+    return json({ error: "LINE連携の設定（LINE_CHANNEL_ID）がまだです" }, 503);
+  }
+  const lineUser = await verifyLineUser(request, env);
+  if (!lineUser) {
+    return json(
+      { error: "LINEでの本人確認ができませんでした。LINEから開き直してください", code: "line_auth" },
+      401
+    );
+  }
+
+  // 自分の情報（名前と結びついているか）
+  if (path === "/api/me" && method === "GET") return getMe(env, lineUser);
+  if (path === "/api/me/link" && method === "POST") {
+    return linkMe(env, lineUser, await readJson(request));
+  }
+
+  // ここから先は、名前と結びついている人だけ
+  const me = await staffOfLineUser(env, lineUser.sub);
+  if (!me) return json({ error: "まだ名前が登録されていません", code: "not_linked" }, 403);
+
+  if (path === "/api/submission" && method === "GET") return getSubmission(env, url, me);
+  if (path === "/api/submission" && method === "POST") {
+    return saveSubmission(env, me, await readJson(request));
+  }
+  if (path === "/api/change-request" && method === "POST") {
+    return addChangeRequest(env, me, await readJson(request));
   }
 
   return json({ error: "見つかりません" }, 404);
+}
+
+// =========================================================
+// 本人確認
+// =========================================================
+
+// 画面から送られてきたLINEのIDトークンを、LINEに問い合わせて本物か確かめる。
+// 本物なら { sub: LINEのユーザーID, name: LINEの表示名 } を返す
+async function verifyLineUser(request, env) {
+  const auth = request.headers.get("Authorization") ?? "";
+  const match = auth.match(/^Bearer (.+)$/);
+  if (!match) return null;
+
+  const res = await fetch(env.LINE_VERIFY_URL || LINE_VERIFY_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ id_token: match[1], client_id: env.LINE_CHANNEL_ID }),
+  });
+  if (!res.ok) return null; // 偽物・期限切れ・別のアプリ向けのトークンなど
+
+  const data = await res.json();
+  // 念のため「このアプリ向けに発行されたトークンか」も確認する
+  if (!data.sub || String(data.aud) !== String(env.LINE_CHANNEL_ID)) return null;
+  return { sub: data.sub, name: data.name ?? "" };
+}
+
+// 管理用の合言葉が合っているか
+function isAdminKey(request, env) {
+  const given = request.headers.get("X-Access-Key") ?? "";
+  return Boolean(given) && safeEqual(given, env.ADMIN_KEY);
+}
+
+// 文字列を比べる（かかる時間から合言葉を推測されないようにする比べ方）
+function safeEqual(a, b) {
+  const enc = new TextEncoder();
+  const x = enc.encode(a);
+  const y = enc.encode(b);
+  if (x.length !== y.length) return false;
+  return crypto.subtle.timingSafeEqual(x, y);
+}
+
+// =========================================================
+// LINEアカウントと名前の結びつけ
+// =========================================================
+
+async function staffOfLineUser(env, lineUserId) {
+  return env.DB.prepare("SELECT id, name FROM staff WHERE line_user_id = ? AND active = 1")
+    .bind(lineUserId)
+    .first();
+}
+
+// 自分がどの名前と結びついているか。まだなら、選べる名前の一覧も返す
+async function getMe(env, lineUser) {
+  const me = await staffOfLineUser(env, lineUser.sub);
+  if (me) return json({ linked: true, staff: me, line_name: lineUser.name });
+
+  const { results } = await env.DB.prepare(
+    "SELECT id, name FROM staff WHERE active = 1 AND line_user_id IS NULL ORDER BY id"
+  ).all();
+  return json({ linked: false, candidates: results, line_name: lineUser.name });
+}
+
+// 名前を選んで、自分のLINEアカウントと結びつける（最初の1回だけ）
+async function linkMe(env, lineUser, body) {
+  const staffId = body?.staff_id;
+  if (!Number.isInteger(staffId)) return json({ error: "名前を選んでください" }, 400);
+
+  if (await staffOfLineUser(env, lineUser.sub)) {
+    return json({ error: "このLINEアカウントは、すでに名前が登録されています" }, 409);
+  }
+
+  // まだ誰とも結びついていない名前のときだけ結びつける
+  // （「line_user_id IS NULL」の条件で、早い者勝ちの取り合いも防ぐ）
+  const result = await env.DB.prepare(
+    `UPDATE staff SET line_user_id = ?, line_name = ?
+      WHERE id = ? AND active = 1 AND line_user_id IS NULL`
+  )
+    .bind(lineUser.sub, lineUser.name || null, staffId)
+    .run();
+
+  if (result.meta.changes !== 1) {
+    return json(
+      { error: "その名前はすでに別のLINEアカウントで登録されています。作成担当に連絡してください" },
+      409
+    );
+  }
+  return json({ ok: true });
+}
+
+// 管理者用：結びつけを解除する（間違えて登録したとき用）
+async function unlinkStaff(env, body) {
+  const id = Number(body?.id);
+  if (!Number.isInteger(id)) return json({ error: "idが正しくありません" }, 400);
+  await env.DB.prepare("UPDATE staff SET line_user_id = NULL, line_name = NULL WHERE id = ?")
+    .bind(id)
+    .run();
+  return json({ ok: true });
 }
 
 // =========================================================
@@ -112,8 +237,8 @@ function periodInfo(period) {
   return { period, deadline: deadlineText(period), open: !isClosed(period) };
 }
 
-// 提出画面で選べる月（今月・来月・再来月）と、最初に選んでおく月を返す
-function listPeriods(isAdmin) {
+// 選べる月（今月・来月・再来月）と、最初に選んでおく月を返す
+function listPeriods() {
   const jstNow = new Date(Date.now() + 9 * 60 * 60 * 1000);
   const periods = [];
   for (let i = 0; i < 3; i++) {
@@ -123,20 +248,12 @@ function listPeriods(isAdmin) {
   }
   // 最初に選んでおくのは「まだ締切前の一番近い月」
   const initial = (periods.find((p) => p.open) ?? periods[periods.length - 1]).period;
-  return json({ periods, initial, admin: isAdmin });
+  return json({ periods, initial });
 }
 
 // =========================================================
-// スタッフ
+// スタッフ（作成担当が管理する名簿）
 // =========================================================
-
-// 在籍中のスタッフ一覧を返す
-async function listStaff(env) {
-  const { results } = await env.DB.prepare(
-    "SELECT id, name FROM staff WHERE active = 1 ORDER BY id"
-  ).all();
-  return json({ staff: results });
-}
 
 // スタッフを追加する
 async function addStaff(env, body) {
@@ -144,50 +261,42 @@ async function addStaff(env, body) {
   if (name.length < 1 || name.length > 30) {
     return json({ error: "名前は1〜30文字で入力してください" }, 400);
   }
-  const row = await env.DB.prepare(
-    "INSERT INTO staff (name) VALUES (?) RETURNING id, name"
-  )
+  const row = await env.DB.prepare("INSERT INTO staff (name) VALUES (?) RETURNING id, name")
     .bind(name)
     .first();
   return json({ staff: row });
 }
 
-// スタッフを一覧から外す（データは残す）
+// スタッフを一覧から外す（提出データは残す。LINEとの結びつけは外す）
 async function deactivateStaff(env, body) {
   const id = Number(body?.id);
   if (!Number.isInteger(id)) return json({ error: "idが正しくありません" }, 400);
-  await env.DB.prepare("UPDATE staff SET active = 0 WHERE id = ?").bind(id).run();
+  await env.DB.prepare(
+    "UPDATE staff SET active = 0, line_user_id = NULL, line_name = NULL WHERE id = ?"
+  )
+    .bind(id)
+    .run();
   return json({ ok: true });
-}
-
-async function isActiveStaff(env, staffId) {
-  const row = await env.DB.prepare("SELECT id FROM staff WHERE id = ? AND active = 1")
-    .bind(staffId)
-    .first();
-  return Boolean(row);
 }
 
 // =========================================================
 // シフト希望
 // =========================================================
 
-// 1人分・1か月分の提出内容と、締切の情報、その人の変更申請を返す
-async function getSubmission(env, url, isAdmin) {
-  const staffId = Number(url.searchParams.get("staff_id"));
+// 自分の1か月分の提出内容と、締切の情報、自分の変更申請を返す
+async function getSubmission(env, url, me) {
   const period = url.searchParams.get("period") ?? "";
-  if (!Number.isInteger(staffId) || !isPeriod(period)) {
-    return json({ error: "パラメータが正しくありません" }, 400);
-  }
+  if (!isPeriod(period)) return json({ error: "月の指定が正しくありません" }, 400);
 
   const [subRes, reqRes] = await env.DB.batch([
     env.DB.prepare("SELECT * FROM submissions WHERE staff_id = ? AND period = ?").bind(
-      staffId,
+      me.id,
       period
     ),
     env.DB.prepare(
       `SELECT id, message, status, created_at FROM change_requests
         WHERE staff_id = ? AND period = ? ORDER BY id DESC`
-    ).bind(staffId, period),
+    ).bind(me.id, period),
   ]);
 
   let submission = subRes.results[0] ?? null;
@@ -204,29 +313,27 @@ async function getSubmission(env, url, isAdmin) {
     submission,
     change_requests: reqRes.results,
     period_info: periodInfo(period),
-    // 締切後でも直接修正できるか（管理用の合言葉のときだけ）
-    can_edit: !isClosed(period) || isAdmin,
+    can_edit: !isClosed(period),
   });
 }
 
-// 提出内容を保存する（同じ人・同じ月の提出があれば上書き）
-async function saveSubmission(env, body, isAdmin) {
+// 自分の提出内容を保存する（同じ月の提出があれば上書き）
+async function saveSubmission(env, me, body) {
+  // 誰の分かは、送られてきた値ではなくLINEの本人確認の結果で決める（なりすまし防止）
+  if (body && typeof body === "object") body.staff_id = me.id;
+
   // ---- 1. 送られてきた内容をチェックする ----
   const problem = validateSubmission(body);
   if (problem) return json({ error: problem }, 400);
 
-  // 締切を過ぎていたら受け付けない（作成担当は例外）
-  if (isClosed(body.period) && !isAdmin) {
+  // 締切を過ぎていたら受け付けない
+  if (isClosed(body.period)) {
     return json(
       {
         error: `${formatPeriodJa(body.period)}分の提出期限（${deadlineText(body.period)}）を過ぎています。変更は「変更を申請する」から送ってください`,
       },
       403
     );
-  }
-
-  if (!(await isActiveStaff(env, body.staff_id))) {
-    return json({ error: "そのスタッフは登録されていません" }, 400);
   }
 
   // ---- 2. まとめて保存する ----
@@ -246,7 +353,7 @@ async function saveSubmission(env, body, isAdmin) {
          note              = excluded.note,
          updated_at        = datetime('now')`
     ).bind(
-      body.staff_id,
+      me.id,
       body.period,
       body.min_days_per_week ?? null,
       body.max_days_per_week ?? null,
@@ -256,7 +363,7 @@ async function saveSubmission(env, body, isAdmin) {
     ),
     // 前回の日ごとの希望をいったん消す
     env.DB.prepare(`DELETE FROM availability WHERE submission_id = ${findId}`).bind(
-      body.staff_id,
+      me.id,
       body.period
     ),
     // 今回の日ごとの希望を入れ直す
@@ -264,7 +371,7 @@ async function saveSubmission(env, body, isAdmin) {
       env.DB.prepare(
         `INSERT INTO availability (submission_id, date, status, start_time, end_time)
          VALUES (${findId}, ?, ?, ?, ?)`
-      ).bind(body.staff_id, body.period, d.date, d.status, d.start_time || null, d.end_time || null)
+      ).bind(me.id, body.period, d.date, d.status, d.start_time || null, d.end_time || null)
     ),
   ];
   await env.DB.batch(statements);
@@ -278,7 +385,10 @@ async function listSubmissions(env, url) {
   if (!isPeriod(period)) return json({ error: "月の指定が正しくありません" }, 400);
 
   const [staffRes, subRes, dayRes, reqRes] = await env.DB.batch([
-    env.DB.prepare("SELECT id, name FROM staff WHERE active = 1 ORDER BY id"),
+    env.DB.prepare(
+      `SELECT id, name, line_name, line_user_id IS NOT NULL AS linked
+         FROM staff WHERE active = 1 ORDER BY id`
+    ),
     env.DB.prepare("SELECT * FROM submissions WHERE period = ?").bind(period),
     env.DB.prepare(
       `SELECT a.submission_id, a.date, a.status, a.start_time, a.end_time
@@ -314,31 +424,26 @@ async function listSubmissions(env, url) {
 // 変更の申請（締切後に出すもの）
 // =========================================================
 
-async function addChangeRequest(env, body) {
-  const staffId = body?.staff_id;
+async function addChangeRequest(env, me, body) {
   const period = body?.period;
   const message = String(body?.message ?? "").trim();
 
-  if (!Number.isInteger(staffId)) return json({ error: "名前を選んでください" }, 400);
   if (!isPeriod(period)) return json({ error: "月の指定が正しくありません" }, 400);
   if (message.length < 1) return json({ error: "変更したい内容を書いてください" }, 400);
   if (message.length > 500) return json({ error: "申請は500文字以内にしてください" }, 400);
-  if (!(await isActiveStaff(env, staffId))) {
-    return json({ error: "そのスタッフは登録されていません" }, 400);
-  }
 
   // いたずらで大量に送られないよう、1人1か月あたりの件数に上限をつける
   const { count } = await env.DB.prepare(
     "SELECT COUNT(*) AS count FROM change_requests WHERE staff_id = ? AND period = ?"
   )
-    .bind(staffId, period)
+    .bind(me.id, period)
     .first();
-  if (count >= 20) return json({ error: "この月の申請が多すぎます。作成担当に直接連絡してください" }, 429);
+  if (count >= 20) {
+    return json({ error: "この月の申請が多すぎます。作成担当に直接連絡してください" }, 429);
+  }
 
-  await env.DB.prepare(
-    "INSERT INTO change_requests (staff_id, period, message) VALUES (?, ?, ?)"
-  )
-    .bind(staffId, period, message)
+  await env.DB.prepare("INSERT INTO change_requests (staff_id, period, message) VALUES (?, ?, ?)")
+    .bind(me.id, period, message)
     .run();
   return json({ ok: true });
 }
@@ -366,7 +471,7 @@ async function setChangeRequestStatus(env, body) {
 
 function validateSubmission(b) {
   if (!b || typeof b !== "object") return "送信内容が読み取れません";
-  if (!Number.isInteger(b.staff_id)) return "名前を選んでください";
+  if (!Number.isInteger(b.staff_id)) return "名前が確認できません";
   if (!isPeriod(b.period)) return "月の指定が正しくありません";
 
   for (const key of ["min_days_per_week", "max_days_per_week"]) {
@@ -416,32 +521,6 @@ function formatPeriodJa(period) {
 }
 
 // =========================================================
-// 合言葉のチェック
-//
-// LINEとつなぐまでの間は、合言葉を知っている人だけが使えるようにしておく。
-// 合言葉そのものはコードには書かず、Cloudflareの設定（シークレット）に入れる。
-//   ACCESS_KEY : スタッフ用の合言葉
-//   ADMIN_KEY  : 作成担当用の合言葉（スタッフ用の画面にも使える）
-// =========================================================
-
-function roleOf(request, env) {
-  const given = request.headers.get("X-Access-Key") ?? "";
-  if (!given) return null;
-  if (env.ADMIN_KEY && safeEqual(given, env.ADMIN_KEY)) return "admin";
-  if (env.ACCESS_KEY && safeEqual(given, env.ACCESS_KEY)) return "staff";
-  return null;
-}
-
-// 文字列を比べる（かかる時間から合言葉を推測されないようにする比べ方）
-function safeEqual(a, b) {
-  const enc = new TextEncoder();
-  const x = enc.encode(a);
-  const y = enc.encode(b);
-  if (x.length !== y.length) return false;
-  return crypto.subtle.timingSafeEqual(x, y);
-}
-
-// =========================================================
 // ちょっとした共通処理
 // =========================================================
 
@@ -453,10 +532,6 @@ function json(data, status = 200) {
       "Cache-Control": "no-store",
     },
   });
-}
-
-function unauthorized() {
-  return json({ error: "合言葉が違います" }, 401);
 }
 
 async function readJson(request) {

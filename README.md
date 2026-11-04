@@ -59,9 +59,13 @@
 - サーバー処理：Cloudflare Workers
 - データベース：Cloudflare D1（SQLite）
 - 公開：GitHubにpushするとCloudflareが自動で公開（Workers Builds）
-- 提出の入口（予定）：LINE公式アカウント（無料プラン）＋ LINEミニアプリ
+- 提出の入口：LINE公式アカウント（無料プラン）＋ LINEミニアプリ（LIFF）
 
-LINEとつなぐまでの間は、合言葉（スタッフ用・作成担当用）を知っている人だけが使えるようにしています。
+## 本人確認のしくみ
+
+- **スタッフ**：LINEの中で提出画面を開くと、LINEが本人を証明するIDトークンを発行する。サーバーはそれをLINEの確認APIに問い合わせてから保存するので、他の人の分を提出・変更することはできない
+- **初回だけ名前を選ぶ**：作成担当が登録した名簿から自分の名前を選ぶと、LINEアカウントと結びつく。一度結びついた名前は他のLINEアカウントからは選べない。間違えた場合は一覧画面から作成担当が解除できる
+- **作成担当**：一覧画面は管理用の合言葉（`ADMIN_KEY`）で開く
 
 ## ファイル構成
 
@@ -84,17 +88,22 @@ wrangler.jsonc     Cloudflareの設定
 2. **テーブルを作る**：作ったデータベースの「コンソール」に `migrations/` の中のSQLを番号順（0001 → 0002 …）に貼り付けて実行
 3. **IDを設定する**：データベースのIDを `wrangler.jsonc` の `database_id` に書く
 4. **GitHubとつなぐ**：「Workers & Pages」→「アプリケーションを作成」→ GitHub → このリポジトリを選び、名前を `shift-app` にしてデプロイ
-5. **合言葉を設定する**：作成したWorkerの「設定」→「変数とシークレット」に、種類「シークレット」で次の2つを追加
-   - `ACCESS_KEY`：スタッフ用の合言葉
-   - `ADMIN_KEY`：作成担当用の合言葉
+5. **合言葉を設定する**：作成したWorkerの「設定」→「変数とシークレット」に、種類「シークレット」で `ADMIN_KEY`（作成担当用の合言葉）を追加
 6. `https://shift-app.<サブドメイン>.workers.dev/` が提出画面、`/admin` が一覧画面
+
+## セットアップ（LINE）
+
+1. LINE公式アカウントを作る（無料のコミュニケーションプラン）
+2. LINE Developersコンソールでプロバイダーを作り、チャネルの種類「LINEミニアプリ」でチャネルを作る
+3. エンドポイントURLに提出画面のURL（`https://shift-app.<サブドメイン>.workers.dev/`）を設定し、スコープは `openid` と `profile`
+4. LIFF IDとチャネルIDを `wrangler.jsonc` の `vars` に書く
+5. LINE公式アカウントのリッチメニューに、ミニアプリのURLを開くボタンを置く
 
 ## 手元で動かす場合
 
 ```
 npm install
-echo "ACCESS_KEY=test-staff" > .dev.vars
-echo "ADMIN_KEY=test-admin" >> .dev.vars
+echo "ADMIN_KEY=test-admin" > .dev.vars
 npm run db:init:local
 npm run dev
 ```

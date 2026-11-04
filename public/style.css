@@ -200,6 +200,13 @@ button:disabled {
   background: var(--card);
 }
 
+/* 提出画面の「◯◯ さん」 */
+.me {
+  margin: 0 0 12px;
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
 /* 締切の表示 */
 .deadline {
   margin: 10px 0 0;

@@ -226,14 +226,56 @@ function renderStaffList(staff) {
   els.staffList.innerHTML = "";
   for (const person of staff) {
     const li = document.createElement("li");
-    const name = document.createElement("span");
+
+    // 名前と、どのLINEアカウントと結びついているか
+    const info = document.createElement("div");
+    const name = document.createElement("div");
     name.textContent = person.name;
-    const button = document.createElement("button");
-    button.type = "button";
-    button.textContent = "外す";
-    button.addEventListener("click", () => onRemoveStaff(person));
-    li.append(name, button);
+    const line = document.createElement("div");
+    line.className = "hint";
+    line.style.margin = "0";
+    line.textContent = person.linked
+      ? `LINE連携済み：${person.line_name || "（表示名なし）"}`
+      : "LINE未連携";
+    info.append(name, line);
+
+    const buttons = document.createElement("div");
+    buttons.style.display = "flex";
+    buttons.style.gap = "6px";
+    if (person.linked) {
+      const unlink = document.createElement("button");
+      unlink.type = "button";
+      unlink.textContent = "連携を解除";
+      unlink.addEventListener("click", () => onUnlinkStaff(person));
+      buttons.append(unlink);
+    }
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.textContent = "外す";
+    remove.addEventListener("click", () => onRemoveStaff(person));
+    buttons.append(remove);
+
+    li.append(info, buttons);
     els.staffList.append(li);
+  }
+}
+
+// 間違ったLINEアカウントと結びついたときに解除する
+async function onUnlinkStaff(person) {
+  if (
+    !confirm(
+      `${person.name} さんとLINE「${person.line_name || ""}」の連携を解除しますか？（解除すると、もう一度名前を選び直せるようになります）`
+    )
+  ) {
+    return;
+  }
+  try {
+    await api("/api/admin/staff/unlink", { method: "POST", body: { id: person.id }, key: adminKey });
+    setStaffMessage(`${person.name} さんの連携を解除しました`, "success");
+    await load();
+  } catch (err) {
+    if (err instanceof AuthError) handleError(err);
+    else setStaffMessage(err.message, "error");
   }
 }
 

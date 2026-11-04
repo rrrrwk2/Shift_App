@@ -13,23 +13,26 @@
     </header>
 
     <main>
-      <!-- 合言葉の入力（最初の1回だけ） -->
-      <section id="key-section" class="card" hidden>
-        <h2>合言葉</h2>
-        <p class="hint">お店で共有されている合言葉を入力してください。</p>
-        <div class="row">
-          <input id="key-input" type="password" autocomplete="off" />
-          <button id="key-button" type="button" style="flex: 0 0 auto">OK</button>
-        </div>
-        <div id="key-message" class="message error"></div>
+      <!-- 起動中・エラーのお知らせ -->
+      <section id="boot-section" class="card">
+        <p id="boot-message" style="margin: 0">LINEで本人確認をしています…</p>
+        <button id="boot-reload" type="button" class="secondary" hidden>もう一度読み込む</button>
+      </section>
+
+      <!-- 最初の1回だけ：自分の名前を選ぶ -->
+      <section id="link-section" class="card" hidden>
+        <h2>はじめに、あなたの名前を選んでください</h2>
+        <p class="hint" id="link-hint"></p>
+        <select id="link-select"></select>
+        <div style="height: 12px"></div>
+        <button id="link-button" type="button" class="primary">この名前で登録する</button>
+        <div id="link-message" class="message error"></div>
       </section>
 
       <div id="app" hidden>
         <!-- 名前と月（どの画面でも上に出す） -->
         <section class="card">
-          <label for="staff-select">名前</label>
-          <select id="staff-select"></select>
-          <div style="height: 12px"></div>
+          <p class="me" id="me-name"></p>
           <label for="period-select">対象の月</label>
           <select id="period-select"></select>
           <p id="deadline-info" class="deadline"></p>
@@ -37,7 +40,6 @@
 
         <div id="flash" class="message success" hidden></div>
         <div id="loading" class="hint" hidden>読み込み中…</div>
-        <div id="pick-name" class="hint" hidden>まず名前を選んでください。</div>
 
         <!-- ===== 入力画面 ===== -->
         <form id="form-view" hidden>
@@ -128,6 +130,8 @@
       </div>
     </main>
 
+    <!-- LINEが提供している部品（LIFF SDK）。LINEの中での本人確認に使う -->
+    <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
     <script src="common.js"></script>
     <script src="submit.js"></script>
   </body>

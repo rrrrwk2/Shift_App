@@ -34,13 +34,17 @@ function clearKey(name) {
 // ---------------------------------------------------------
 class AuthError extends Error {}
 
-async function api(path, { method = "GET", body, key } = {}) {
+// key   : 管理用の合言葉（一覧画面で使う）
+// token : LINEのIDトークン（提出画面で使う）
+async function api(path, { method = "GET", body, key, token } = {}) {
+  const headers = {};
+  if (key) headers["X-Access-Key"] = key;
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  if (body) headers["Content-Type"] = "application/json";
+
   const res = await fetch(path, {
     method,
-    headers: {
-      "X-Access-Key": key,
-      ...(body ? { "Content-Type": "application/json" } : {}),
-    },
+    headers,
     body: body ? JSON.stringify(body) : undefined,
   });
 
@@ -51,7 +55,7 @@ async function api(path, { method = "GET", body, key } = {}) {
     // JSONでない返事（通信エラーなど）
   }
 
-  if (res.status === 401) throw new AuthError(data?.error || "合言葉が違います");
+  if (res.status === 401) throw new AuthError(data?.error || "本人確認ができませんでした");
   if (!res.ok) {
     const err = new Error(data?.error || `通信エラー（${res.status}）`);
     err.status = res.status; // 403（締切後）などを見分けられるようにしておく

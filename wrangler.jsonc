@@ -25,6 +25,14 @@
     }
   ],
 
+  // LINE連携の設定（どちらも秘密情報ではないのでここに書いてOK）
+  //   LIFF_ID         : LINE Developersの「LIFF ID」
+  //   LINE_CHANNEL_ID : LINE Developersの「チャネルID」（IDトークンの確認に使う）
+  "vars": {
+    "LIFF_ID": "",
+    "LINE_CHANNEL_ID": ""
+  },
+
   // Cloudflareのダッシュボードでログを見られるようにする
   "observability": {
     "enabled": true

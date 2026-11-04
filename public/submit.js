@@ -8,23 +8,23 @@
 //   request : 締切後の「変更の申請」を書く画面
 // =========================================================
 
-const KEY_NAME = "shiftapp.key"; // 合言葉を覚えておく場所の名前
-const STAFF_NAME = "shiftapp.staff"; // 前回選んだ名前を覚えておく場所の名前
-
 // 画面の部品をまとめて取っておく
 const $ = (id) => document.getElementById(id);
 const els = {
-  keySection: $("key-section"),
-  keyInput: $("key-input"),
-  keyButton: $("key-button"),
-  keyMessage: $("key-message"),
+  bootSection: $("boot-section"),
+  bootMessage: $("boot-message"),
+  bootReload: $("boot-reload"),
+  linkSection: $("link-section"),
+  linkHint: $("link-hint"),
+  linkSelect: $("link-select"),
+  linkButton: $("link-button"),
+  linkMessage: $("link-message"),
   app: $("app"),
-  staffSelect: $("staff-select"),
+  meName: $("me-name"),
   periodSelect: $("period-select"),
   deadlineInfo: $("deadline-info"),
   flash: $("flash"),
   loading: $("loading"),
-  pickName: $("pick-name"),
   // 入力画面
   formView: $("form-view"),
   defaultStart: $("default-start"),
@@ -61,9 +61,9 @@ const els = {
 };
 
 // 画面の状態
-let accessKey = loadKey(KEY_NAME);
+let idToken = ""; // LINEが発行した「本人の証明書」。サーバーに送って本人確認してもらう
 let periodList = []; // サーバーから受け取った月ごとの締切情報
-let current = null; // 今選んでいる人・月の { submission, change_requests, period_info, can_edit }
+let current = null; // 今選んでいる月の { submission, change_requests, period_info, can_edit }
 // 入力中の日： "2026-12-03" → { status: "ok" | "maybe", start_time, end_time }
 let days = new Map();
 
@@ -76,12 +76,9 @@ async function init() {
   fillDaysSelect(els.minDays, "以上");
   fillDaysSelect(els.maxDays, "まで");
 
-  els.keyButton.addEventListener("click", onKeyEntered);
-  els.keyInput.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") onKeyEntered();
-  });
-  els.staffSelect.addEventListener("change", onTargetChanged);
-  els.periodSelect.addEventListener("change", onTargetChanged);
+  els.bootReload.addEventListener("click", () => location.reload());
+  els.linkButton.addEventListener("click", onLink);
+  els.periodSelect.addEventListener("change", onPeriodChanged);
   els.defaultStart.addEventListener("input", renderDayList);
   els.defaultEnd.addEventListener("input", renderDayList);
   els.formView.addEventListener("submit", onSubmit);
@@ -98,70 +95,124 @@ async function init() {
     if (e.persisted) location.reload();
   });
 
-  if (accessKey) {
-    await start();
-  } else {
-    showKeySection();
-  }
-}
-
-// 合言葉が正しければ、月の一覧とスタッフ一覧を読み込んで画面を出す
-async function start() {
   try {
-    const [periodsData, staffData] = await Promise.all([
-      api("/api/periods", { key: accessKey }),
-      api("/api/staff", { key: accessKey }),
-    ]);
-    periodList = periodsData.periods;
-    fillPeriodSelect(els.periodSelect, periodsData);
-    fillStaffSelect(staffData.staff);
-    els.keySection.hidden = true;
-    els.app.hidden = false;
-    await onTargetChanged();
-  } catch (err) {
-    if (err instanceof AuthError) {
-      clearKey(KEY_NAME);
-      accessKey = "";
-      showKeySection(err.message);
-    } else {
-      showKeySection(`読み込みに失敗しました：${err.message}`);
+    // 1. LINEにつなぐための設定（LIFF ID）をサーバーからもらう
+    const { liff_id } = await api("/api/config");
+    if (!liff_id) {
+      showBoot("LINE連携の設定がまだ終わっていません。作成担当に連絡してください。");
+      return;
     }
+
+    // 2. LINEの部品を準備する
+    if (typeof liff === "undefined") {
+      showBoot("LINEの部品を読み込めませんでした。通信状態を確認してください。", true);
+      return;
+    }
+    await liff.init({ liffId: liff_id });
+
+    // 3. LINEにログインしていなければ、ログイン画面へ（LINEアプリの中なら自動でログイン済み）
+    if (!liff.isLoggedIn()) {
+      liff.login({ redirectUri: location.href });
+      return;
+    }
+
+    // 4. 本人の証明書（IDトークン）を受け取る
+    idToken = liff.getIDToken();
+    if (!idToken) {
+      showBoot("LINEから本人確認の情報を受け取れませんでした。LINEから開き直してください。", true);
+      return;
+    }
+
+    await loadMe();
+  } catch (err) {
+    handleError(err);
   }
 }
 
-function showKeySection(message = "") {
-  els.app.hidden = true;
-  els.keySection.hidden = false;
-  els.keyMessage.textContent = message;
-  els.keyInput.focus();
+// 自分がどの名前と結びついているかを確かめて、次の画面に進む
+async function loadMe() {
+  const me = await api("/api/me", { token: idToken });
+  if (!me.linked) {
+    showLinkSection(me);
+    return;
+  }
+  els.meName.textContent = `${me.staff.name} さん`;
+
+  const periodsData = await api("/api/periods");
+  periodList = periodsData.periods;
+  fillPeriodSelect(els.periodSelect, periodsData);
+
+  els.bootSection.hidden = true;
+  els.linkSection.hidden = true;
+  els.app.hidden = false;
+  await onPeriodChanged();
 }
 
-async function onKeyEntered() {
-  const value = els.keyInput.value.trim();
-  if (!value) return;
-  accessKey = value;
-  saveKey(KEY_NAME, value);
-  await start();
+// 起動中のお知らせを出す（reload が true なら「もう一度読み込む」ボタンも出す）
+function showBoot(message, reload = false) {
+  els.app.hidden = true;
+  els.linkSection.hidden = true;
+  els.bootSection.hidden = false;
+  els.bootMessage.textContent = message;
+  els.bootReload.hidden = !reload;
+}
+
+// どの画面でも共通のエラー処理
+function handleError(err) {
+  if (err instanceof AuthError) {
+    // LINEの本人確認が切れたなど
+    showBoot(err.message, true);
+  } else {
+    showBoot(`読み込みに失敗しました：${err.message}`, true);
+  }
+}
+
+// ---------------------------------------------------------
+// 最初の1回だけ：名前とLINEアカウントを結びつける
+// ---------------------------------------------------------
+function showLinkSection(me) {
+  els.bootSection.hidden = true;
+  els.app.hidden = true;
+  els.linkSection.hidden = false;
+  els.linkHint.textContent = `LINE「${me.line_name || "あなた"}」さんとして登録します。最初の1回だけです。一度登録すると、この名前では他の人は提出できなくなります。間違えたときは作成担当に連絡してください。`;
+
+  els.linkSelect.innerHTML = '<option value="">選んでください</option>';
+  for (const s of me.candidates) {
+    const opt = document.createElement("option");
+    opt.value = s.id;
+    opt.textContent = s.name;
+    els.linkSelect.append(opt);
+  }
+  if (me.candidates.length === 0) {
+    els.linkMessage.textContent =
+      "選べる名前がありません。作成担当に、名簿への登録をお願いしてください。";
+    els.linkButton.disabled = true;
+  }
+}
+
+async function onLink() {
+  const staffId = Number(els.linkSelect.value);
+  if (!staffId) {
+    els.linkMessage.textContent = "名前を選んでください";
+    return;
+  }
+  const name = els.linkSelect.selectedOptions[0].textContent;
+  if (!confirm(`「${name}」として登録します。よろしいですか？`)) return;
+
+  els.linkButton.disabled = true;
+  try {
+    await api("/api/me/link", { method: "POST", body: { staff_id: staffId }, token: idToken });
+    await loadMe();
+  } catch (err) {
+    els.linkMessage.textContent = err.message;
+  } finally {
+    els.linkButton.disabled = false;
+  }
 }
 
 // ---------------------------------------------------------
 // 選択肢を作る
 // ---------------------------------------------------------
-function fillStaffSelect(staff) {
-  els.staffSelect.innerHTML = '<option value="">選んでください</option>';
-  for (const s of staff) {
-    const opt = document.createElement("option");
-    opt.value = s.id;
-    opt.textContent = s.name;
-    els.staffSelect.append(opt);
-  }
-  // 前回選んだ名前があれば、最初から選んでおく
-  const last = loadKey(STAFF_NAME);
-  if (last && staff.some((s) => String(s.id) === last)) {
-    els.staffSelect.value = last;
-  }
-}
-
 function fillDaysSelect(select, suffix) {
   select.innerHTML = '<option value="">指定なし</option>';
   for (let n = 1; n <= 7; n++) {
@@ -173,39 +224,24 @@ function fillDaysSelect(select, suffix) {
 }
 
 // ---------------------------------------------------------
-// 名前か月が変わったら、その人・その月の状況を読み込む
+// 月が変わったら、その月の状況を読み込む
 // ---------------------------------------------------------
-async function onTargetChanged() {
+async function onPeriodChanged() {
   hideFlash();
   renderDeadlineInfo();
-
-  const staffId = els.staffSelect.value;
-  if (!staffId) {
-    current = null;
-    showView(null);
-    els.pickName.hidden = false;
-    return;
-  }
-  saveKey(STAFF_NAME, staffId);
   await refresh();
 }
 
 // サーバーから最新の状況を読み込んで、表示を決め直す
 async function refresh() {
-  els.pickName.hidden = true;
   els.loading.hidden = false;
   showView(null);
   try {
-    current = await api(
-      `/api/submission?staff_id=${els.staffSelect.value}&period=${els.periodSelect.value}`,
-      { key: accessKey }
-    );
+    current = await api(`/api/submission?period=${els.periodSelect.value}`, { token: idToken });
     decideView();
   } catch (err) {
     if (err instanceof AuthError) {
-      clearKey(KEY_NAME);
-      accessKey = "";
-      showKeySection(err.message);
+      handleError(err);
     } else {
       showFlash(err.message, "error");
     }
@@ -286,7 +322,7 @@ function renderDone() {
       .join("");
   }
 
-  // 締切前（または管理用の合言葉）なら修正、締切後なら申請
+  // 締切前なら修正、締切後なら申請
   els.editButton.hidden = !current.can_edit;
   els.requestButtonDone.hidden = current.can_edit;
 }
@@ -447,8 +483,8 @@ async function onSubmit(event) {
   event.preventDefault(); // ページが再読み込みされないようにする
   setFormMessage("");
 
+  // 誰の分かはサーバーがLINEの本人確認で決めるので、名前は送らない
   const body = {
-    staff_id: Number(els.staffSelect.value),
     period: els.periodSelect.value,
     default_start: els.defaultStart.value,
     default_end: els.defaultEnd.value,
@@ -465,16 +501,14 @@ async function onSubmit(event) {
 
   els.submitButton.disabled = true;
   try {
-    await api("/api/submission", { method: "POST", body, key: accessKey });
+    await api("/api/submission", { method: "POST", body, token: idToken });
     // 送信できたら完了画面に切り替える
     await refresh();
     els.doneTitle.textContent = "提出しました！";
     window.scrollTo({ top: 0, behavior: "smooth" });
   } catch (err) {
     if (err instanceof AuthError) {
-      clearKey(KEY_NAME);
-      accessKey = "";
-      showKeySection(err.message);
+      handleError(err);
     } else if (err.status === 403) {
       // 入力している間に締切を過ぎた場合など
       await refresh();
@@ -511,8 +545,8 @@ async function onSendRequest(event) {
   try {
     await api("/api/change-request", {
       method: "POST",
-      body: { staff_id: Number(els.staffSelect.value), period: els.periodSelect.value, message },
-      key: accessKey,
+      body: { period: els.periodSelect.value, message },
+      token: idToken,
     });
     await refresh();
     showFlash("申請を送りました。作成担当が確認します。");
