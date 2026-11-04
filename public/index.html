@@ -30,6 +30,12 @@
       </section>
 
       <div id="app" hidden>
+        <!-- 「希望を出す」と「シフトを見る」の切り替え -->
+        <div class="tabs" role="tablist">
+          <button id="tab-submit" type="button" role="tab" aria-selected="true">希望を出す</button>
+          <button id="tab-shift" type="button" role="tab" aria-selected="false">シフトを見る</button>
+        </div>
+
         <!-- 名前と月（どの画面でも上に出す） -->
         <section class="card">
           <p class="me" id="me-name"></p>
@@ -121,6 +127,22 @@
           <button id="request-cancel" class="secondary" type="button">やめる</button>
           <div id="request-message-area" class="message"></div>
         </form>
+
+        <!-- ===== 公開されたシフトを見る画面 ===== -->
+        <section id="shift-view" hidden>
+          <p id="shift-meta" class="hint"></p>
+          <section class="card">
+            <h2>あなたのシフト</h2>
+            <ul id="my-shift-list" class="summary-days"></ul>
+          </section>
+          <section class="card" id="all-shift-card">
+            <h2>みんなのシフト</h2>
+            <p class="hint">横にスクロールできます。あなたの行は色がついています。</p>
+            <div class="table-wrap">
+              <table id="all-shift-table" class="grid view-grid"></table>
+            </div>
+          </section>
+        </section>
 
         <!-- 自分の変更申請（あれば） -->
         <section id="my-requests" class="card" hidden>

@@ -98,6 +98,19 @@ async function handleApi(request, env, url) {
     if (path === "/api/admin/change-request/status" && method === "POST") {
       return setChangeRequestStatus(env, await readJson(request));
     }
+    if (path === "/api/admin/schedule" && method === "GET") return getScheduleAdmin(env, url);
+    if (path === "/api/admin/schedule/generate" && method === "POST") {
+      return generateDraft(env, await readJson(request));
+    }
+    if (path === "/api/admin/schedule/assign" && method === "POST") {
+      return assignShift(env, await readJson(request));
+    }
+    if (path === "/api/admin/schedule/unassign" && method === "POST") {
+      return unassignShift(env, await readJson(request));
+    }
+    if (path === "/api/admin/schedule/publish" && method === "POST") {
+      return publishSchedule(env, await readJson(request));
+    }
     if (path === "/api/admin/remind" && method === "POST") {
       return sendManualReminder(env, await readJson(request));
     }
@@ -133,6 +146,7 @@ async function handleApi(request, env, url) {
   if (path === "/api/change-request" && method === "POST") {
     return addChangeRequest(env, me, await readJson(request));
   }
+  if (path === "/api/schedule" && method === "GET") return getPublishedSchedule(env, url, me);
 
   return json({ error: "見つかりません" }, 404);
 }
@@ -550,6 +564,198 @@ async function listSubmissions(env, url) {
 }
 
 // =========================================================
+// シフト（作成担当が組むもの）
+//   assignments … 下書き（作成担当が自由に編集する）
+//   schedules   … 公開した時点のコピー（スタッフが見るのはこっち）
+// =========================================================
+
+// 下書きを変えたら、変更の番号を1つ増やす（公開したときの番号と比べて、公開後に変更があるか分かるように）
+function touchSchedule(env, period) {
+  return env.DB.prepare(
+    `INSERT INTO schedules (period, updated_at, draft_version) VALUES (?, datetime('now'), 1)
+     ON CONFLICT (period) DO UPDATE SET updated_at = datetime('now'), draft_version = draft_version + 1`
+  ).bind(period);
+}
+
+// 管理者用：下書きと公開の状態を返す
+async function getScheduleAdmin(env, url) {
+  const period = url.searchParams.get("period") ?? "";
+  if (!isPeriod(period)) return json({ error: "月の指定が正しくありません" }, 400);
+
+  const [aRes, sRes] = await env.DB.batch([
+    env.DB.prepare(
+      "SELECT staff_id, date, start_time, end_time FROM assignments WHERE period = ? ORDER BY date"
+    ).bind(period),
+    env.DB.prepare(
+      "SELECT updated_at, published_at, draft_version, published_version FROM schedules WHERE period = ?"
+    ).bind(period),
+  ]);
+  const sch = sRes.results[0] ?? null;
+  return json({
+    assignments: aRes.results,
+    schedule: {
+      exists: Boolean(sch),
+      updated_at: sch?.updated_at ?? null,
+      published_at: sch?.published_at ?? null,
+      // 公開したあとに下書きを直したか（もう一度公開が必要か）
+      changed_since_publish: Boolean(sch?.published_at && sch.draft_version !== sch.published_version),
+    },
+  });
+}
+
+// 管理者用：希望の○から下書きを作る（すでに下書きがあるときは overwrite: true のときだけ作り直す）
+async function generateDraft(env, body) {
+  const period = body?.period;
+  if (!isPeriod(period)) return json({ error: "月の指定が正しくありません" }, 400);
+
+  const existing = await env.DB.prepare("SELECT COUNT(*) AS n FROM assignments WHERE period = ?")
+    .bind(period)
+    .first();
+  if (existing.n > 0 && body?.overwrite !== true) {
+    return json({ error: "すでに下書きがあります", code: "draft_exists", count: existing.n }, 409);
+  }
+
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM assignments WHERE period = ?").bind(period),
+    // ○の日を、その日の時間（なければその人の基本の時間）で入れる
+    env.DB.prepare(
+      `INSERT INTO assignments (period, staff_id, date, start_time, end_time)
+       SELECT s.period, s.staff_id, a.date,
+              COALESCE(a.start_time, s.default_start),
+              COALESCE(a.end_time, s.default_end)
+         FROM availability a
+         JOIN submissions s ON s.id = a.submission_id
+         JOIN staff st ON st.id = s.staff_id
+        WHERE s.period = ? AND a.status = 'ok' AND st.active = 1`
+    ).bind(period),
+    touchSchedule(env, period),
+  ]);
+  const { n } = await env.DB.prepare("SELECT COUNT(*) AS n FROM assignments WHERE period = ?")
+    .bind(period)
+    .first();
+  return json({ ok: true, count: n });
+}
+
+// 管理者用：1人・1日分を入れる（すでに入っていたら時間を上書き）
+async function assignShift(env, body) {
+  const { period, staff_id: staffId, date, start_time: start, end_time: end } = body ?? {};
+  if (!isPeriod(period) || !isDate(date) || !date.startsWith(period + "-")) {
+    return json({ error: "日付が正しくありません" }, 400);
+  }
+  if (!Number.isInteger(staffId)) return json({ error: "スタッフが正しくありません" }, 400);
+  if ((start && !isTime(start)) || (end && !isTime(end))) {
+    return json({ error: "時刻の形式が正しくありません" }, 400);
+  }
+  const staff = await env.DB.prepare("SELECT id FROM staff WHERE id = ? AND active = 1")
+    .bind(staffId)
+    .first();
+  if (!staff) return json({ error: "そのスタッフは登録されていません" }, 400);
+
+  await env.DB.batch([
+    env.DB.prepare(
+      `INSERT INTO assignments (period, staff_id, date, start_time, end_time) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT (staff_id, date) DO UPDATE SET
+         period = excluded.period, start_time = excluded.start_time, end_time = excluded.end_time`
+    ).bind(period, staffId, date, start || null, end || null),
+    touchSchedule(env, period),
+  ]);
+  return json({ ok: true });
+}
+
+// 管理者用：1人・1日分を外す
+async function unassignShift(env, body) {
+  const { period, staff_id: staffId, date } = body ?? {};
+  if (!isPeriod(period) || !isDate(date) || !Number.isInteger(staffId)) {
+    return json({ error: "指定が正しくありません" }, 400);
+  }
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM assignments WHERE staff_id = ? AND date = ?").bind(staffId, date),
+    touchSchedule(env, period),
+  ]);
+  return json({ ok: true });
+}
+
+// 管理者用：今の下書きを公開する（この時点の内容をコピーして保存。notify なら LINE で知らせる）
+async function publishSchedule(env, body) {
+  const period = body?.period;
+  if (!isPeriod(period)) return json({ error: "月の指定が正しくありません" }, 400);
+
+  const [staffRes, aRes, sRes] = await env.DB.batch([
+    // 名前と並び順だけを残す（性別やレベルはスタッフに見せないので入れない）
+    env.DB.prepare(
+      `SELECT DISTINCT st.id, st.name, st.sort_order
+         FROM staff st
+        WHERE st.active = 1 OR st.id IN (SELECT staff_id FROM assignments WHERE period = ?)
+        ORDER BY st.sort_order, st.id`
+    ).bind(period),
+    env.DB.prepare(
+      "SELECT staff_id, date, start_time, end_time FROM assignments WHERE period = ? ORDER BY date"
+    ).bind(period),
+    env.DB.prepare("SELECT published_at FROM schedules WHERE period = ?").bind(period),
+  ]);
+  if (aRes.results.length === 0) return json({ error: "下書きが空です" }, 400);
+
+  const isUpdate = Boolean(sRes.results[0]?.published_at);
+  const data = {
+    staff: staffRes.results.map((s) => ({ id: s.id, name: s.name })),
+    assignments: aRes.results,
+  };
+  // 公開した時点の「変更の番号」も覚えておく（このあと下書きを直すと番号がずれて「公開後に変更あり」になる）
+  await env.DB.prepare(
+    `INSERT INTO schedules (period, published_at, published_version, published_data)
+     VALUES (?, datetime('now'), 0, ?)
+     ON CONFLICT (period) DO UPDATE SET
+       published_at = datetime('now'),
+       published_version = draft_version,
+       published_data = excluded.published_data`
+  )
+    .bind(period, JSON.stringify(data))
+    .run();
+
+  // LINEでみんなに知らせる
+  let notified = 0;
+  if (body?.notify === true && env.LINE_MESSAGING_TOKEN) {
+    const { results } = await env.DB.prepare(
+      "SELECT line_user_id FROM staff WHERE active = 1 AND line_user_id IS NOT NULL"
+    ).all();
+    const userIds = results.map((r) => r.line_user_id);
+    if (userIds.length) {
+      const [, month] = period.split("-").map(Number);
+      const text =
+        `【シフト${isUpdate ? "更新" : "公開"}のお知らせ】\n` +
+        `${month}月のシフトが${isUpdate ? "更新されました" : "公開されました"}。\n` +
+        `メニューの「シフト提出」→「シフトを見る」から確認してください。` +
+        (env.LIFF_ID ? `\nhttps://miniapp.line.me/${env.LIFF_ID}?view=shift&period=${period}` : "");
+      await sendLineText(env, userIds, text);
+      notified = userIds.length;
+    }
+  }
+  return json({ ok: true, notified, updated: isUpdate });
+}
+
+// スタッフ用：公開されているシフトを返す（自分の行がどれか分かるようにする）
+async function getPublishedSchedule(env, url, me) {
+  const period = url.searchParams.get("period") ?? "";
+  if (!isPeriod(period)) return json({ error: "月の指定が正しくありません" }, 400);
+
+  const row = await env.DB.prepare(
+    "SELECT published_at, published_data FROM schedules WHERE period = ? AND published_at IS NOT NULL"
+  )
+    .bind(period)
+    .first();
+  if (!row) return json({ published: false });
+
+  const data = JSON.parse(row.published_data);
+  return json({
+    published: true,
+    published_at: row.published_at,
+    me: me.id,
+    staff: data.staff,
+    assignments: data.assignments,
+  });
+}
+
+// =========================================================
 // 提出のお願い（リマインド）をLINEで送る
 // =========================================================
 
@@ -658,7 +864,11 @@ async function sendReminderMessage(env, userIds, period, daysLeft) {
     `${month}月分のシフト希望の提出期限は ${deadlineText(period)} です（${when}）。\n` +
     `まだ提出していない人は、メニューの「シフト提出」か、下のリンクから出してください。\n` +
     (env.LIFF_ID ? `https://miniapp.line.me/${env.LIFF_ID}` : "");
+  await sendLineText(env, userIds, text);
+}
 
+// 指定したLINEユーザー全員に、同じ文章を送る
+async function sendLineText(env, userIds, text) {
   // LINEのマルチキャストは1回に500人まで
   for (let i = 0; i < userIds.length; i += 500) {
     const res = await fetch(`${env.LINE_API_BASE || LINE_API_BASE}/v2/bot/message/multicast`, {

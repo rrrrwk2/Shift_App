@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>シフト作成</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header style="max-width: 1200px">
+      <nav class="admin-nav"><a href="/admin">希望の一覧</a><a href="/shift" aria-current="page">シフト作成</a></nav>
+      <h1>シフト作成</h1>
+      <p>みんなの希望をもとにシフトを組んで、公開する画面。希望そのものは書き換えない。</p>
+    </header>
+
+    <main class="wide">
+      <!-- 管理用の合言葉（一覧画面と共通） -->
+      <section id="key-section" class="card" hidden style="max-width: 480px">
+        <h2>管理用の合言葉</h2>
+        <div class="row">
+          <input id="key-input" type="password" autocomplete="off" />
+          <button id="key-button" type="button" style="flex: 0 0 auto">OK</button>
+        </div>
+        <div id="key-message" class="message error"></div>
+      </section>
+
+      <div id="content" hidden>
+        <section class="card">
+          <div class="row" style="flex-wrap: wrap">
+            <div style="min-width: 160px; flex: 0 0 auto">
+              <label for="period-select">対象の月</label>
+              <select id="period-select"></select>
+            </div>
+            <div id="status" class="shift-status"></div>
+            <button id="reload-button" type="button" style="flex: 0 0 auto">再読み込み</button>
+          </div>
+
+          <div class="shift-actions">
+            <button id="generate-button" type="button">希望から下書きを作る</button>
+            <span class="spacer"></span>
+            <label class="check-row">
+              <input id="notify-check" type="checkbox" checked />
+              <span>公開したらLINEでみんなに知らせる</span>
+            </label>
+            <button id="publish-button" type="button" class="publish">公開する</button>
+          </div>
+          <div id="action-message" class="message"></div>
+        </section>
+
+        <div class="table-wrap">
+          <table id="shift-grid" class="grid shift-grid"></table>
+        </div>
+        <p class="hint legend">
+          マスをタップすると、入れる・外す・時間の変更ができる。左上の小さい印はその人の希望（○ / △）。
+          <span class="legend-box assigned"></span>入っている
+          <span class="legend-box outside"></span>希望が出ていない日に入れた
+          <span class="legend-box ng"></span>足りない
+          <span class="legend-box over"></span>定員より多い
+        </p>
+
+        <!-- 調整が必要なところの一覧 -->
+        <section id="issues-card" class="card issues-card" hidden>
+          <h2 id="issues-title">調整が必要なところ</h2>
+          <ul id="issues-list" class="issues-list"></ul>
+        </section>
+      </div>
+    </main>
+
+    <!-- マスをタップしたときに開く小さい画面 -->
+    <dialog id="cell-dialog" class="cell-dialog">
+      <h2 id="cell-title"></h2>
+      <p id="cell-pref" class="hint"></p>
+      <div class="row">
+        <input id="cell-start" type="time" aria-label="開始" />
+        <span class="sep">〜</span>
+        <input id="cell-end" type="time" aria-label="終了" />
+      </div>
+      <p class="hint" style="margin-top: 6px">終わりが空欄ならラストまで。</p>
+      <div class="dialog-buttons">
+        <button id="cell-save" type="button" class="primary">入れる</button>
+        <button id="cell-remove" type="button" class="danger-outline">外す</button>
+        <button id="cell-cancel" type="button">やめる</button>
+      </div>
+      <div id="cell-message" class="message error"></div>
+    </dialog>
+
+    <script src="common.js"></script>
+    <script src="rules.js"></script>
+    <script src="shift.js"></script>
+  </body>
+</html>

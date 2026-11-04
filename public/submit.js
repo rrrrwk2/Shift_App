@@ -58,6 +58,14 @@ const els = {
   requestMessageArea: $("request-message-area"),
   myRequests: $("my-requests"),
   myRequestsList: $("my-requests-list"),
+  // シフトを見る
+  tabSubmit: $("tab-submit"),
+  tabShift: $("tab-shift"),
+  shiftView: $("shift-view"),
+  shiftMeta: $("shift-meta"),
+  myShiftList: $("my-shift-list"),
+  allShiftCard: $("all-shift-card"),
+  allShiftTable: $("all-shift-table"),
 };
 
 // 画面の状態
@@ -79,6 +87,8 @@ async function init() {
   els.bootReload.addEventListener("click", () => location.reload());
   els.linkButton.addEventListener("click", onLink);
   els.periodSelect.addEventListener("change", onPeriodChanged);
+  els.tabSubmit.addEventListener("click", () => switchTab("submit"));
+  els.tabShift.addEventListener("click", () => switchTab("shift"));
   els.defaultStart.addEventListener("input", renderDayList);
   els.defaultEnd.addEventListener("input", renderDayList);
   els.formView.addEventListener("submit", onSubmit);
@@ -141,6 +151,12 @@ async function loadMe() {
   const periodsData = await api("/api/periods");
   periodList = periodsData.periods;
   fillPeriodSelect(els.periodSelect, periodsData);
+
+  // LINEの「シフト公開」のお知らせのリンク（?view=shift&period=…）から開いたとき
+  const params = new URLSearchParams(location.search);
+  const wanted = params.get("period");
+  if (wanted && periodList.some((p) => p.period === wanted)) els.periodSelect.value = wanted;
+  if (params.get("view") === "shift") setTab("shift");
 
   els.bootSection.hidden = true;
   els.linkSection.hidden = true;
@@ -229,12 +245,105 @@ function fillDaysSelect(select, suffix) {
 async function onPeriodChanged() {
   hideFlash();
   renderDeadlineInfo();
-  await refresh();
+  if (tab === "shift") await loadShift();
+  else await refresh();
+}
+
+// ---------------------------------------------------------
+// 「希望を出す」と「シフトを見る」の切り替え
+// ---------------------------------------------------------
+let tab = "submit";
+
+function setTab(name) {
+  tab = name;
+  els.tabSubmit.setAttribute("aria-selected", String(name === "submit"));
+  els.tabShift.setAttribute("aria-selected", String(name === "shift"));
+  els.deadlineInfo.hidden = name === "shift"; // 締切はシフトを見るときには関係ない
+}
+
+async function switchTab(name) {
+  if (name === tab) return;
+  setTab(name);
+  await onPeriodChanged();
+}
+
+// ---------------------------------------------------------
+// 公開されたシフトを見る
+// ---------------------------------------------------------
+async function loadShift() {
+  showView(null);
+  els.shiftView.hidden = true;
+  els.loading.hidden = false;
+  try {
+    const data = await api(`/api/schedule?period=${els.periodSelect.value}`, { token: idToken });
+    renderShift(data);
+    els.shiftView.hidden = false;
+  } catch (err) {
+    if (err instanceof AuthError) handleError(err);
+    else showFlash(err.message, "error");
+  } finally {
+    els.loading.hidden = true;
+  }
+}
+
+function renderShift(data) {
+  const period = els.periodSelect.value;
+  if (!data.published) {
+    els.shiftMeta.textContent = "";
+    els.myShiftList.innerHTML = `<li>${formatPeriod(period)}のシフトはまだ公開されていません。</li>`;
+    els.allShiftCard.hidden = true;
+    return;
+  }
+  els.shiftMeta.textContent = `${formatUpdated(data.published_at)} に公開されたシフトです。`;
+  els.allShiftCard.hidden = false;
+
+  // ---- あなたのシフト ----
+  const mine = data.assignments.filter((a) => a.staff_id === data.me);
+  els.myShiftList.innerHTML = mine.length
+    ? mine
+        .map(
+          (a) =>
+            `<li><span>${formatDate(a.date)}</span><span></span><span>${escapeHtml(
+              formatRange(a.start_time, a.end_time || "ラスト") || "時間未定"
+            )}</span></li>`
+        )
+        .join("")
+    : "<li>この月のシフトはありません。</li>";
+
+  // ---- みんなのシフト（名前 × 日付の表） ----
+  const dates = Array.from({ length: daysInMonth(period) }, (_, i) => toDate(period, i + 1));
+  const byKey = new Map(data.assignments.map((a) => [`${a.staff_id}|${a.date}`, a]));
+  const short = (t) => (t ? t.replace(/:00$/, "") : "");
+
+  let html = "<thead><tr><th class='name'>名前</th>";
+  for (const d of dates) {
+    const wd = weekdayOf(d);
+    const holiday = isHoliday(d);
+    html += `<th class="${wd === 0 || holiday ? "sun" : wd === 6 ? "sat" : ""}">${Number(d.slice(-2))}<br>${
+      holiday ? "祝" : WEEKDAYS[wd]
+    }</th>`;
+  }
+  html += "</tr></thead><tbody>";
+  for (const person of data.staff) {
+    // シフトが1日もない人は表に出さない
+    if (!dates.some((d) => byKey.has(`${person.id}|${d}`))) continue;
+    html += `<tr class="${person.id === data.me ? "me-row" : ""}"><td class="name">${escapeHtml(person.name)}</td>`;
+    for (const d of dates) {
+      const a = byKey.get(`${person.id}|${d}`);
+      html += a
+        ? `<td class="on">${escapeHtml(short(a.start_time) || "?")}-${escapeHtml(a.end_time ? short(a.end_time) : "L")}</td>`
+        : "<td></td>";
+    }
+    html += "</tr>";
+  }
+  html += "</tbody>";
+  els.allShiftTable.innerHTML = html;
 }
 
 // サーバーから最新の状況を読み込んで、表示を決め直す
 async function refresh() {
   els.loading.hidden = false;
+  els.shiftView.hidden = true;
   showView(null);
   try {
     current = await api(`/api/submission?period=${els.periodSelect.value}`, { token: idToken });
