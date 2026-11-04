@@ -30,7 +30,7 @@ const els = {
   requestsCard: $("requests-card"),
   requestsTitle: $("requests-title"),
   requestsList: $("requests-list"),
-  ruleTotal: $("rule-total"),
+  ruleCapacity: $("rule-capacity"),
   ruleVeteran: $("rule-veteran"),
   ruleMale: $("rule-male"),
   ruleFemale: $("rule-female"),
@@ -181,31 +181,40 @@ function renderGrid(period, staff, submissions, periodInfo, rules) {
   // ---- ルールの判定（日ごと） ----
   const judged = Object.fromEntries(dates.map((date) => [date, judgeDay(date, count, rules)]));
 
-  // ---- 見出し（足りない日は色をつける） ----
+  // ---- 見出し（調整が必要な日は色をつける。祝日は「祝」と表示） ----
   let head =
     "<thead><tr><th class='name'>名前</th><th>性別</th><th>レベル</th><th>週の希望</th><th>基本の時間</th>";
   for (const date of dates) {
     const wd = weekdayOf(date);
-    const cls = [wd === 0 ? "sun" : wd === 6 ? "sat" : "", judged[date].level].join(" ");
-    head += `<th class="${cls}" title="${escapeHtml(judged[date].reasons.join("、"))}">${Number(
+    const holiday = isHoliday(date);
+    const dayCls = wd === 0 || holiday ? "sun" : wd === 6 ? "sat" : "";
+    const title = judged[date].items.map((i) => i.text).join("、");
+    head += `<th class="${dayCls} ${judged[date].level}" title="${escapeHtml(title)}">${Number(
       date.slice(-2)
-    )}<br>${WEEKDAYS[wd]}</th>`;
+    )}<br>${holiday ? "祝" : WEEKDAYS[wd]}</th>`;
   }
   head += "<th>備考</th><th>更新</th></tr></thead>";
 
   // ---- 合計（日ごとの人数） ----
-  const footRow = (label, values, cls = "") => {
+  //   ruleKey を渡した行は、その項目（定員・男性・女性・ベテラン）の判定で色をつける
+  //   → どの行が色付きかを見れば、何が原因かが分かる
+  const footRow = (label, values, cls = "", ruleKey = null) => {
     let row = `<tr class="${cls}"><td class='name'>${label}</td><td colspan='4'></td>`;
     for (const date of dates) {
-      row += `<td class="${judged[date].level}">${values[date] || ""}</td>`;
+      const item = ruleKey ? judged[date].items.find((i) => i.key === ruleKey) : null;
+      const target = ruleKey ? judged[date].targets[ruleKey] : null;
+      const text = values[date] || (target != null ? "0" : "");
+      row += `<td class="${item?.level ?? ""}">${text}${
+        target != null ? `<span class="target">/${target}</span>` : ""
+      }</td>`;
     }
     return row + "<td colspan='2'></td></tr>";
   };
   let foot = "<tfoot>";
-  foot += footRow("○の人数", count.ok.all);
-  foot += footRow("　うち男性", count.ok.male, "sub-count");
-  foot += footRow("　うち女性", count.ok.female, "sub-count");
-  foot += footRow("　うちベテラン", count.ok.veteran, "sub-count");
+  foot += footRow("○の人数（定員）", count.ok.all, "", "capacity");
+  foot += footRow("　うち男性", count.ok.male, "sub-count", "male");
+  foot += footRow("　うち女性", count.ok.female, "sub-count", "female");
+  foot += footRow("　うちベテラン", count.ok.veteran, "sub-count", "veteran");
   foot += footRow("△の人数", count.maybe.all);
   foot += footRow("　うち男性", count.maybe.male, "sub-count");
   foot += footRow("　うち女性", count.maybe.female, "sub-count");
@@ -228,47 +237,82 @@ function renderGrid(period, staff, submissions, periodInfo, rules) {
 
 // ---------------------------------------------------------
 // 毎日のルールの判定
-//   level: ""     … 足りている（またはチェックしない日）
-//          "warn" … ○の人だけでは足りないが、△の人も入れば足りる
-//          "ng"   … △の人を入れても足りない
-//   reasons: 足りないものの説明（例：「ベテラン 0/1人」）
+//
+// 1日ごとに、項目（定員・男性・女性・ベテラン）ごとの判定をまとめて返す
+//   items:   問題がある項目だけ { key, label, level, text } の形で入る
+//     level: "warn" … ○の人だけでは足りないが、△の人も入れば足りる
+//            "ng"   … △の人を入れても足りない
+//            "over" … 定員より多い
+//   level:   その日全体の判定（ng → warn → over の順に強い）
+//   targets: 項目ごとの目標人数（表の下に「3/5」のように出すため）
 // ---------------------------------------------------------
-const RULE_ITEMS = [
-  { key: "min_total", label: "合計", counter: "all" },
-  { key: "min_veteran", label: "ベテラン", counter: "veteran" },
-  { key: "min_male", label: "男性", counter: "male" },
-  { key: "min_female", label: "女性", counter: "female" },
+const MIN_ITEMS = [
+  { key: "male", rule: "min_male", label: "男性" },
+  { key: "female", rule: "min_female", label: "女性" },
+  { key: "veteran", rule: "min_veteran", label: "ベテラン" },
 ];
 
-function judgeDay(date, count, rules) {
-  if (rules.closed_weekdays.includes(weekdayOf(date))) return { level: "", reasons: [] };
-
-  let level = "";
-  const reasons = [];
-  for (const item of RULE_ITEMS) {
-    const need = rules[item.key];
-    if (need === null || need === undefined) continue; // この項目はチェックしない
-    const ok = count.ok[item.counter][date];
-    const withMaybe = ok + count.maybe[item.counter][date];
-    if (ok >= need) continue; // ○だけで足りている
-    reasons.push(`${item.label} ${ok}/${need}人${withMaybe >= need ? "（△を入れれば足りる）" : ""}`);
-    if (withMaybe < need) level = "ng";
-    else if (level !== "ng") level = "warn";
-  }
-  return { level, reasons };
+// その日の定員（祝日なら祝日の人数、そうでなければ曜日の人数）
+function capacityOf(date, rules) {
+  const key = isHoliday(date) ? "holiday" : String(weekdayOf(date));
+  const cap = rules.capacity?.[key];
+  return cap === undefined ? null : cap;
 }
 
-// 足りない日を文章で一覧にする（スマホでも分かるように）
+function judgeDay(date, count, rules) {
+  const result = { level: "", items: [], targets: {} };
+  if (rules.closed_weekdays.includes(weekdayOf(date))) return result; // チェックしない曜日
+
+  // 足りないかどうかを調べて、足りなければ items に入れる
+  const checkMin = (key, label, counter, need) => {
+    result.targets[key] = need;
+    const ok = count.ok[counter][date];
+    const withMaybe = ok + count.maybe[counter][date];
+    if (ok >= need) return;
+    const level = withMaybe >= need ? "warn" : "ng";
+    result.items.push({
+      key,
+      label,
+      level,
+      text: `${label} ${ok}/${need}人${level === "warn" ? "（△を入れれば足りる）" : ""}`,
+    });
+  };
+
+  // 定員：少なすぎ（warn / ng）と多すぎ（over）
+  const cap = capacityOf(date, rules);
+  if (cap !== null) {
+    const ok = count.ok.all[date];
+    if (ok > cap) {
+      result.targets.capacity = cap;
+      result.items.push({ key: "capacity", label: "定員", level: "over", text: `定員 ${ok}/${cap}人（${ok - cap}人多い）` });
+    } else {
+      checkMin("capacity", "定員", "all", cap);
+    }
+  }
+
+  // 最低限必要な人数（男性・女性・ベテラン）
+  for (const item of MIN_ITEMS) {
+    const need = rules[item.rule];
+    if (need === null || need === undefined) continue; // この項目はチェックしない
+    checkMin(item.key, item.label, item.key, need);
+  }
+
+  const levels = result.items.map((i) => i.level);
+  result.level = levels.includes("ng") ? "ng" : levels.includes("warn") ? "warn" : levels.includes("over") ? "over" : "";
+  return result;
+}
+
+// 調整が必要な日を、原因ごとに色のついたラベルで一覧にする（スマホでも分かるように）
 function renderIssues(dates, judged) {
   const bad = dates.filter((d) => judged[d].level);
   els.issuesCard.hidden = bad.length === 0;
-  els.issuesTitle.textContent = `人が足りない日（${bad.length}日）`;
+  els.issuesTitle.textContent = `調整が必要な日（${bad.length}日）`;
   els.issuesList.innerHTML = bad
     .map(
       (d) =>
-        `<li class="${judged[d].level}"><span class="issue-date">${formatDate(d)}</span>${escapeHtml(
-          judged[d].reasons.join("、")
-        )}</li>`
+        `<li><span class="issue-date">${formatDate(d)}${isHoliday(d) ? "祝" : ""}</span>${judged[d].items
+          .map((i) => `<span class="issue-chip ${i.level}">${escapeHtml(i.text)}</span>`)
+          .join("")}</li>`
     )
     .join("");
 }
@@ -278,9 +322,19 @@ function renderIssues(dates, judged) {
 // ---------------------------------------------------------
 let currentRules = null;
 
+// 定員の入力欄：月〜日・祝の順に並べる
+const CAPACITY_FIELDS = [
+  ["1", "月"], ["2", "火"], ["3", "水"], ["4", "木"], ["5", "金"], ["6", "土"], ["0", "日"], ["holiday", "祝"],
+];
+
 function renderRulesForm(rules) {
   currentRules = rules;
-  els.ruleTotal.value = rules.min_total ?? "";
+  els.ruleCapacity.innerHTML = CAPACITY_FIELDS.map(
+    ([key, label]) =>
+      `<label class="${key === "0" || key === "holiday" ? "sun" : key === "6" ? "sat" : ""}">${label}<input type="number" min="0" max="99" inputmode="numeric" data-key="${key}" value="${
+        rules.capacity?.[key] ?? ""
+      }" />人</label>`
+  ).join("");
   els.ruleVeteran.value = rules.min_veteran ?? "";
   els.ruleMale.value = rules.min_male ?? "";
   els.ruleFemale.value = rules.min_female ?? "";
@@ -294,8 +348,11 @@ function renderRulesForm(rules) {
 
 async function onSaveRules() {
   const num = (input) => (input.value === "" ? null : Number(input.value));
+  const capacity = Object.fromEntries(
+    [...els.ruleCapacity.querySelectorAll("input")].map((input) => [input.dataset.key, num(input)])
+  );
   const body = {
-    min_total: num(els.ruleTotal),
+    capacity,
     min_veteran: num(els.ruleVeteran),
     min_male: num(els.ruleMale),
     min_female: num(els.ruleFemale),

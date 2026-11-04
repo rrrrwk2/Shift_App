@@ -63,9 +63,14 @@
         <!-- 毎日のルール：足りない日を色で知らせる -->
         <details id="rules-card" class="card rules-card">
           <summary><h2>毎日の必要人数（ルール）</h2></summary>
-          <p class="hint">○の人がこの人数に届かない日を色で知らせる。空欄の項目はチェックしない。</p>
+          <p class="hint" style="margin-bottom: 6px">
+            <strong>定員</strong>：○の人がこの人数より少ない日・多い日を色で知らせる（祝日は「祝」の人数を使う）。空欄はチェックしない。
+          </p>
+          <div id="rule-capacity" class="capacity-grid"></div>
+          <p class="hint" style="margin: 14px 0 6px">
+            <strong>最低限必要な人数</strong>：○の人の中にこの人数がいない日を知らせる。空欄はチェックしない。
+          </p>
           <div class="rules-grid">
-            <label>合計<input id="rule-total" type="number" min="0" max="99" inputmode="numeric" />人以上</label>
             <label>ベテラン<input id="rule-veteran" type="number" min="0" max="99" inputmode="numeric" />人以上</label>
             <label>男性<input id="rule-male" type="number" min="0" max="99" inputmode="numeric" />人以上</label>
             <label>女性<input id="rule-female" type="number" min="0" max="99" inputmode="numeric" />人以上</label>
@@ -85,11 +90,12 @@
         <p class="hint legend">
           <span class="legend-box warn"></span>○だけでは足りない（△の人も入れば足りる）
           <span class="legend-box ng"></span>△の人を入れても足りない
+          <span class="legend-box over"></span>定員より多い
         </p>
 
         <!-- ルールを満たさない日の一覧 -->
         <section id="issues-card" class="card issues-card" hidden>
-          <h2 id="issues-title">人が足りない日</h2>
+          <h2 id="issues-title">調整が必要な日</h2>
           <ul id="issues-list" class="issues-list"></ul>
         </section>
 

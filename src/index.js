@@ -321,26 +321,33 @@ async function setStaffLevel(env, body) {
   return json({ ok: true });
 }
 
-// 毎日のルール（何人以上必要か）。null の項目はチェックしない
+// 毎日のルール。null の項目はチェックしない
+//   capacity : 曜日ごとの定員（○の人がこの人数ちょうどが目標。少なすぎ・多すぎを知らせる）
+//              "0"=日曜 〜 "6"=土曜、"holiday"=祝日（祝日は曜日より優先）
+//   min_〜   : その日に最低何人必要か（ベテラン・男性・女性）
+const CAPACITY_KEYS = ["0", "1", "2", "3", "4", "5", "6", "holiday"];
 const DEFAULT_RULES = {
-  min_total: null, // ○の合計
-  min_veteran: null, // そのうちベテラン
-  min_male: null, // そのうち男性
-  min_female: null, // そのうち女性
+  capacity: Object.fromEntries(CAPACITY_KEYS.map((k) => [k, null])),
+  min_veteran: null,
+  min_male: null,
+  min_female: null,
   closed_weekdays: [], // チェックしない曜日（0=日曜 〜 6=土曜）。定休日など
 };
 
+// 0〜99の整数か、空（null）かを確かめる
+function toCount(v) {
+  if (v === null || v === undefined || v === "") return null;
+  if (Number.isInteger(v) && v >= 0 && v <= 99) return v;
+  throw new Error("人数は0〜99で入力してください");
+}
+
 async function saveRules(env, body) {
-  const rules = {};
-  for (const key of ["min_total", "min_veteran", "min_male", "min_female"]) {
-    const v = body?.[key];
-    if (v === null || v === undefined || v === "") {
-      rules[key] = null;
-    } else if (Number.isInteger(v) && v >= 0 && v <= 99) {
-      rules[key] = v;
-    } else {
-      return json({ error: "人数は0〜99で入力してください" }, 400);
-    }
+  const rules = { capacity: {} };
+  try {
+    for (const key of CAPACITY_KEYS) rules.capacity[key] = toCount(body?.capacity?.[key]);
+    for (const key of ["min_veteran", "min_male", "min_female"]) rules[key] = toCount(body?.[key]);
+  } catch (err) {
+    return json({ error: err.message }, 400);
   }
   const closed = body?.closed_weekdays ?? [];
   if (!Array.isArray(closed) || !closed.every((d) => Number.isInteger(d) && d >= 0 && d <= 6)) {
@@ -355,6 +362,16 @@ async function saveRules(env, body) {
     .bind(JSON.stringify(rules))
     .run();
   return json({ ok: true, rules });
+}
+
+// 保存されているルールを読み込む（前の形で保存されていても、足りない項目は空で補う）
+function loadRules(row) {
+  const saved = row ? JSON.parse(row.value) : {};
+  return {
+    ...DEFAULT_RULES,
+    ...saved,
+    capacity: { ...DEFAULT_RULES.capacity, ...(saved.capacity ?? {}) },
+  };
 }
 
 // 並び順を保存する（ids に上から順番に並べたスタッフのidが入ってくる）
@@ -526,7 +543,7 @@ async function listSubmissions(env, url) {
     submissions,
     change_requests: reqRes.results,
     reminders: remindRes.results,
-    rules: rulesRes.results[0] ? JSON.parse(rulesRes.results[0].value) : DEFAULT_RULES,
+    rules: loadRules(rulesRes.results[0]),
     reminder_ready: Boolean(env.LINE_MESSAGING_TOKEN), // LINEで送る準備ができているか
     period_info: periodInfo(period),
   });

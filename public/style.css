@@ -729,13 +729,6 @@ table.grid td.level-veteran {
   margin-bottom: 4px;
 }
 
-.issues-list li.warn {
-  background: var(--warn-bg);
-}
-
-.issues-list li.ng {
-  background: var(--ng-bg);
-}
 
 .issue-date {
   display: inline-block;
@@ -746,4 +739,91 @@ table.grid td.level-veteran {
 /* 名簿：選択欄やボタンが多いので、狭い画面では折り返す */
 .staff-list li {
   flex-wrap: wrap;
+}
+
+/* ---------- 定員・多すぎる日・原因ごとの色 ---------- */
+:root {
+  --over-bg: #d7e6fb; /* 定員より多い日 */
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --over-bg: #1f3553;
+  }
+}
+
+table.grid th.over,
+table.grid tfoot td.over {
+  background: var(--over-bg);
+}
+
+/* 表の下の「3/5」の「/5」（目標の人数）は小さく */
+table.grid tfoot .target {
+  font-size: 0.65rem;
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.legend-box.over {
+  background: var(--over-bg);
+}
+
+/* 定員の入力欄（月〜日・祝） */
+.capacity-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+  gap: 8px;
+}
+
+.capacity-grid label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+}
+
+.capacity-grid label.sun {
+  color: var(--sun);
+}
+
+.capacity-grid label.sat {
+  color: var(--sat);
+}
+
+.capacity-grid input[type="number"] {
+  width: 3.5em;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+}
+
+/* 調整が必要な日：原因ごとの色付きラベル */
+.issues-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  margin: 0;
+}
+
+.issue-chip {
+  font-size: 0.8rem;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.issue-chip.warn {
+  background: var(--warn-bg);
+}
+
+.issue-chip.ng {
+  background: var(--ng-bg);
+}
+
+.issue-chip.over {
+  background: var(--over-bg);
 }
