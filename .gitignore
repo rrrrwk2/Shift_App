@@ -1,0 +1,34 @@
+# 依存パッケージ
+node_modules/
+
+# ビルド成果物
+dist/
+build/
+.next/
+out/
+.cache/
+
+# 秘密情報（LINEのトークンやAPIキーなど）は絶対にコミットしない
+.env
+.env.*
+!.env.example
+
+# ログ
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.log
+
+# ローカル開発用ツールのデータ
+.wrangler/
+.vercel/
+.netlify/
+.supabase/
+
+# エディタ・OS
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
