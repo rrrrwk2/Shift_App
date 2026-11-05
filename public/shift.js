@@ -122,7 +122,7 @@ function renderStatus() {
     schedule.changed_since_publish ? "status-alert" : ""
   }">${escapeHtml(pub)}</div>`;
 
-  els.generateButton.textContent = schedule.exists ? "希望から下書きを作り直す" : "希望から下書きを作る";
+  els.generateButton.textContent = schedule.exists ? "希望から下書きを再作成" : "希望から下書きを作成";
   els.publishButton.textContent = schedule.published_at ? "公開内容を更新する" : "公開する";
   els.publishButton.disabled = shifts.size === 0 || (schedule.published_at && !schedule.changed_since_publish);
 }
