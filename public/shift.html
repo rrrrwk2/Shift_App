@@ -16,7 +16,7 @@
     <main class="wide">
       <!-- 管理用の合言葉（一覧画面と共通） -->
       <section id="key-section" class="card" hidden style="max-width: 480px">
-        <h2>管理用の合言葉</h2>
+        <h2>管理用合言葉</h2>
         <div class="row">
           <input id="key-input" type="password" autocomplete="off" />
           <button id="key-button" type="button" style="flex: 0 0 auto">OK</button>
@@ -36,11 +36,11 @@
           </div>
 
           <div class="shift-actions">
-            <button id="generate-button" type="button">希望から下書きを作る</button>
+            <button id="generate-button" type="button">希望から下書きを作成</button>
             <span class="spacer"></span>
             <label class="check-row">
               <input id="notify-check" type="checkbox" checked />
-              <span>公開したらLINEでみんなに知らせる</span>
+              <span>公開したらLINEで通知</span>
             </label>
             <button id="publish-button" type="button" class="publish">公開する</button>
           </div>
@@ -51,7 +51,7 @@
           <table id="shift-grid" class="grid shift-grid"></table>
         </div>
         <p class="hint legend">
-          マスをタップすると、入れる・外す・時間の変更ができる。左上の小さい印はその人の希望（○ / △）。
+          左上の小さい印はその人の希望（○ / △）。
           <span class="legend-box assigned"></span>入っている
           <span class="legend-box outside"></span>希望が出ていない日に入れた
           <span class="legend-box ng"></span>足りない

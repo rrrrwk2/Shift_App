@@ -16,7 +16,7 @@
     <main class="wide">
       <!-- 管理用の合言葉 -->
       <section id="key-section" class="card" hidden style="max-width: 480px">
-        <h2>管理用の合言葉</h2>
+        <h2>管理用合言葉</h2>
         <div class="row">
           <input id="key-input" type="password" autocomplete="off" />
           <button id="key-button" type="button" style="flex: 0 0 auto">OK</button>
@@ -39,7 +39,7 @@
         <section id="remind-card" class="card">
           <h2>提出のお願い（LINE）</h2>
           <p class="hint" id="remind-hint">
-            締切の3日前（12日）と前日（14日）の12:00に、まだ提出していない人へLINEで自動送信。LINE連携していない人には届かない。
+            締切の3日前（12日）と前日（14日）の12:00に、まだ提出していない人へLINEで自動送信。LINE連携済みの人のみ。
           </p>
 
           <!-- 未提出の人：チェックを付けた人にだけ個別にお願いを送れる -->
@@ -63,20 +63,20 @@
 
         <!-- 毎日のルール：足りない日を色で知らせる -->
         <details id="rules-card" class="card rules-card">
-          <summary><h2>毎日の必要人数（ルール）</h2></summary>
+          <summary><h2>定員人数の設定</h2></summary>
           <p class="hint" style="margin-bottom: 6px">
-            <strong>定員</strong>：○の人がこの人数より少ない日・多い日を色で知らせる（祝日は「祝」の人数を使う）。空欄はチェックしない。
+            <strong>定員</strong>：少ない日・多い日を色付け。
           </p>
           <div id="rule-capacity" class="capacity-grid"></div>
           <p class="hint" style="margin: 14px 0 6px">
-            <strong>最低限必要な人数</strong>：○の人の中にこの人数がいない日を知らせる。空欄はチェックしない。
+            <strong>最低限必要な人数</strong>：人数がいない日を知らせる。
           </p>
           <div class="rules-grid">
             <label>ベテラン<input id="rule-veteran" type="number" min="0" max="99" inputmode="numeric" />人以上</label>
             <label>男性<input id="rule-male" type="number" min="0" max="99" inputmode="numeric" />人以上</label>
             <label>女性<input id="rule-female" type="number" min="0" max="99" inputmode="numeric" />人以上</label>
           </div>
-          <p class="hint" style="margin: 12px 0 6px">チェックしない曜日（定休日など）</p>
+          <p class="hint" style="margin: 12px 0 6px">チェックしない曜日（定休日などの設定）</p>
           <div id="rule-closed" class="weekday-checks"></div>
           <button id="rules-save" type="button" style="margin-top: 12px">保存</button>
           <div id="rules-message" class="message"></div>
@@ -101,10 +101,7 @@
         </section>
 
         <section class="card" style="margin-top: 20px; max-width: 480px">
-          <h2>スタッフの登録・並び順</h2>
-          <p class="hint">ここで登録した名前が、スタッフがLINEで初めて開いたときの選択肢に出る。一度選ばれた名前はそのLINEアカウント専用になる。</p>
-          <p class="hint">名前の左の「⋮⋮」をドラッグすると並び順を変えられる（一覧表の行の順番も変わる）。</p>
-          <p class="hint">性別とレベルは日ごとの人数を数えるためのもの。この画面でだけ見られて、スタッフ側には出ない。</p>
+          <h2>スタッフの登録・変更</h2>
           <div class="row">
             <input id="staff-name" type="text" maxlength="30" placeholder="名前" />
             <button id="staff-add" type="button" style="flex: 0 0 auto">追加</button>
