@@ -6,14 +6,8 @@
 // ・「公開する」を押した時点の下書きが、スタッフに見えるシフトになる
 // =========================================================
 
-const ADMIN_KEY_NAME = "shiftapp.adminKey"; // 一覧画面と同じ合言葉を使う
-
 const $ = (id) => document.getElementById(id);
 const els = {
-  keySection: $("key-section"),
-  keyInput: $("key-input"),
-  keyButton: $("key-button"),
-  keyMessage: $("key-message"),
   content: $("content"),
   periodSelect: $("period-select"),
   status: $("status"),
@@ -37,8 +31,6 @@ const els = {
   cellMessage: $("cell-message"),
 };
 
-let adminKey = loadKey(ADMIN_KEY_NAME);
-
 // 画面の状態（load() で読み込む）
 let state = null;
 // {
@@ -54,10 +46,6 @@ const keyOf = (staffId, date) => `${staffId}|${date}`;
 init();
 
 async function init() {
-  els.keyButton.addEventListener("click", onKeyEntered);
-  els.keyInput.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") onKeyEntered();
-  });
   els.periodSelect.addEventListener("change", load);
   els.reloadButton.addEventListener("click", load);
   els.generateButton.addEventListener("click", onGenerate);
@@ -71,44 +59,16 @@ async function init() {
   els.cellRemove.addEventListener("click", onRemoveCell);
   els.cellCancel.addEventListener("click", () => els.dialog.close());
 
-  if (adminKey) await start();
-  else showKeySection();
-}
-
-async function start() {
-  try {
-    await api("/api/admin/check", { key: adminKey });
+  // LINEでログインして、管理者だと確認できたら読み込む（admin-auth.js）
+  await adminLogin(async () => {
     fillPeriodSelect(els.periodSelect, await api("/api/periods"));
-    els.keySection.hidden = true;
-    els.content.hidden = false;
     await load();
-  } catch (err) {
-    handleError(err);
-  }
-}
-
-function showKeySection(message = "") {
-  els.content.hidden = true;
-  els.keySection.hidden = false;
-  els.keyMessage.textContent = message;
-  els.keyInput.focus();
-}
-
-async function onKeyEntered() {
-  const value = els.keyInput.value.trim();
-  if (!value) return;
-  adminKey = value;
-  saveKey(ADMIN_KEY_NAME, value);
-  await start();
+  });
 }
 
 function handleError(err) {
-  if (err instanceof AuthError) {
-    clearKey(ADMIN_KEY_NAME);
-    adminKey = "";
-    showKeySection(err.message);
-  } else if (els.content.hidden) {
-    showKeySection(err.message);
+  if (err instanceof AuthError || err.status === 403) {
+    handleAuthError(err); // 本人確認が切れた・管理者でなくなった（admin-auth.js）
   } else {
     setMessage(err.message, "error");
   }
@@ -121,8 +81,8 @@ async function load() {
   const period = els.periodSelect.value;
   try {
     const [sub, sch] = await Promise.all([
-      api(`/api/admin/submissions?period=${period}`, { key: adminKey }),
-      api(`/api/admin/schedule?period=${period}`, { key: adminKey }),
+      adminApi(`/api/admin/submissions?period=${period}`),
+      adminApi(`/api/admin/schedule?period=${period}`),
     ]);
 
     const prefs = new Map();
@@ -178,10 +138,9 @@ async function onGenerate() {
   }
   els.generateButton.disabled = true;
   try {
-    const res = await api("/api/admin/schedule/generate", {
+    const res = await adminApi("/api/admin/schedule/generate", {
       method: "POST",
       body: { period, overwrite: again },
-      key: adminKey,
     });
     await load();
     setMessage(`希望の○から下書きを作りました（${res.count}コマ）`, "success");
@@ -200,10 +159,9 @@ async function onPublish() {
   }
   els.publishButton.disabled = true;
   try {
-    const res = await api("/api/admin/schedule/publish", {
+    const res = await adminApi("/api/admin/schedule/publish", {
       method: "POST",
       body: { period: state.period, notify },
-      key: adminKey,
     });
     await load();
     setMessage(
@@ -424,7 +382,7 @@ async function onRemoveCell() {
 async function saveCell(path, body) {
   els.cellSave.disabled = els.cellRemove.disabled = true;
   try {
-    await api(path, { method: "POST", body, key: adminKey });
+    await adminApi(path, { method: "POST", body });
     els.dialog.close();
     await load();
   } catch (err) {

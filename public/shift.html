@@ -8,21 +8,17 @@
   </head>
   <body>
     <header style="max-width: 1200px">
-      <nav class="admin-nav"><a href="/admin">希望の一覧</a><a href="/shift" aria-current="page">シフト作成</a></nav>
+      <div class="admin-top">
+        <nav class="admin-nav"><a href="/admin">希望の一覧</a><a href="/shift" aria-current="page">シフト作成</a></nav>
+        <div id="user-bar" class="user-bar"></div>
+      </div>
       <h1>シフト作成</h1>
       <p>みんなの希望をもとにシフトを組んで、公開する画面。希望そのものは書き換えない。</p>
     </header>
 
     <main class="wide">
-      <!-- 管理用の合言葉（一覧画面と共通） -->
-      <section id="key-section" class="card" hidden style="max-width: 480px">
-        <h2>管理用合言葉</h2>
-        <div class="row">
-          <input id="key-input" type="password" autocomplete="off" />
-          <button id="key-button" type="button" style="flex: 0 0 auto">OK</button>
-        </div>
-        <div id="key-message" class="message error"></div>
-      </section>
+      <!-- ログイン（LINE）・管理者の登録（admin-auth.js が中身を作る） -->
+      <section id="auth-section" class="card" style="max-width: 520px"></section>
 
       <div id="content" hidden>
         <section class="card">
@@ -84,8 +80,11 @@
       <div id="cell-message" class="message error"></div>
     </dialog>
 
+    <!-- LINEでのログインに使うLINEの部品 -->
+    <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
     <script src="common.js"></script>
     <script src="rules.js"></script>
+    <script src="admin-auth.js"></script>
     <script src="shift.js"></script>
   </body>
 </html>

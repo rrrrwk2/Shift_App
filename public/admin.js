@@ -2,14 +2,8 @@
 // 作成担当用の一覧画面の動き
 // =========================================================
 
-const ADMIN_KEY_NAME = "shiftapp.adminKey";
-
 const $ = (id) => document.getElementById(id);
 const els = {
-  keySection: $("key-section"),
-  keyInput: $("key-input"),
-  keyButton: $("key-button"),
-  keyMessage: $("key-message"),
   content: $("content"),
   periodSelect: $("period-select"),
   summary: $("summary"),
@@ -40,22 +34,29 @@ const els = {
   issuesCard: $("issues-card"),
   issuesTitle: $("issues-title"),
   issuesList: $("issues-list"),
+  adminList: $("admin-list"),
+  adminInvite: $("admin-invite"),
+  adminMessage: $("admin-message"),
+  codeDialog: $("code-dialog"),
+  codeTitle: $("code-title"),
+  codeValue: $("code-value"),
+  codeMessage: $("code-message"),
+  codeCopy: $("code-copy"),
+  codeCopyResult: $("code-copy-result"),
+  codeClose: $("code-close"),
 };
-
-let adminKey = loadKey(ADMIN_KEY_NAME);
 
 init();
 
 async function init() {
-  els.keyButton.addEventListener("click", onKeyEntered);
-  els.keyInput.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") onKeyEntered();
-  });
   els.periodSelect.addEventListener("change", load);
   els.reloadButton.addEventListener("click", load);
   els.staffAdd.addEventListener("click", onAddStaff);
   els.remindButton.addEventListener("click", onRemindNow);
   els.rulesSave.addEventListener("click", onSaveRules);
+  els.adminInvite.addEventListener("click", onInviteAdmin);
+  els.codeCopy.addEventListener("click", copyCodeMessage);
+  els.codeClose.addEventListener("click", () => els.codeDialog.close());
   els.checkAll.addEventListener("change", () => {
     for (const box of checkableBoxes()) box.checked = els.checkAll.checked;
     updateRemindButton();
@@ -64,49 +65,16 @@ async function init() {
     if (e.key === "Enter") onAddStaff();
   });
 
-  if (adminKey) {
-    await start();
-  } else {
-    showKeySection();
-  }
-}
-
-async function start() {
-  try {
-    await api("/api/admin/check", { key: adminKey });
-    // 月の選択肢（締切情報つき）をサーバーから受け取る
-    fillPeriodSelect(els.periodSelect, await api("/api/periods", { key: adminKey }));
-    els.keySection.hidden = true;
-    els.content.hidden = false;
+  // LINEでログインして、管理者だと確認できたら読み込む（admin-auth.js）
+  await adminLogin(async () => {
+    fillPeriodSelect(els.periodSelect, await api("/api/periods"));
     await load();
-  } catch (err) {
-    handleError(err);
-  }
-}
-
-function showKeySection(message = "") {
-  els.content.hidden = true;
-  els.keySection.hidden = false;
-  els.keyMessage.textContent = message;
-  els.keyInput.focus();
-}
-
-async function onKeyEntered() {
-  const value = els.keyInput.value.trim();
-  if (!value) return;
-  adminKey = value;
-  saveKey(ADMIN_KEY_NAME, value);
-  await start();
+  });
 }
 
 function handleError(err) {
-  if (err instanceof AuthError) {
-    clearKey(ADMIN_KEY_NAME);
-    adminKey = "";
-    showKeySection(err.message);
-  } else if (els.content.hidden) {
-    // まだ一覧を表示していない段階のエラーは、合言葉の欄の下に出す
-    showKeySection(err.message);
+  if (err instanceof AuthError || err.status === 403) {
+    handleAuthError(err); // 本人確認が切れた・管理者でなくなった（admin-auth.js）
   } else {
     els.summary.textContent = err.message;
   }
@@ -118,12 +86,13 @@ function handleError(err) {
 async function load() {
   const period = els.periodSelect.value;
   try {
-    const data = await api(`/api/admin/submissions?period=${period}`, { key: adminKey });
+    const data = await adminApi(`/api/admin/submissions?period=${period}`);
     renderGrid(period, data.staff, data.submissions, data.period_info, data.rules);
     renderRulesForm(data.rules);
     renderRequests(data.change_requests);
     renderReminders(data);
     renderStaffList(data.staff);
+    renderAdmins((await adminApi("/api/admin/admins")).admins);
   } catch (err) {
     handleError(err);
   }
@@ -293,7 +262,7 @@ async function onSaveRules() {
   };
   els.rulesSave.disabled = true;
   try {
-    await api("/api/admin/rules", { method: "POST", body, key: adminKey });
+    await adminApi("/api/admin/rules", { method: "POST", body });
     await load();
     setRulesMessage("保存しました", "success");
   } catch (err) {
@@ -400,10 +369,9 @@ async function onRemindNow() {
   }
   els.remindButton.disabled = true;
   try {
-    const res = await api("/api/admin/remind", {
+    const res = await adminApi("/api/admin/remind", {
       method: "POST",
       body: { period, staff_ids: staffIds },
-      key: adminKey,
     });
     await load();
     setRemindMessage(`${res.recipients}人に送りました`, "success");
@@ -451,10 +419,9 @@ function renderRequests(requests) {
 
 async function setRequestStatus(id, status) {
   try {
-    await api("/api/admin/change-request/status", {
+    await adminApi("/api/admin/change-request/status", {
       method: "POST",
       body: { id, status },
-      key: adminKey,
     });
     await load();
   } catch (err) {
@@ -485,9 +452,13 @@ function renderStaffList(staff) {
     const line = document.createElement("div");
     line.className = "hint";
     line.style.margin = "0";
-    line.textContent = person.linked
-      ? `LINE連携済み：${person.line_name || "（表示名なし）"}`
-      : "LINE未連携";
+    if (person.linked) {
+      line.textContent = `LINE連携済み：${person.line_name || "（表示名なし）"}`;
+    } else if (person.invite_expires_at) {
+      line.textContent = `招待中（${formatUpdated(person.invite_expires_at)}まで有効）`;
+    } else {
+      line.textContent = "LINE未連携";
+    }
     info.append(name, line);
 
     const buttons = document.createElement("div");
@@ -519,12 +490,25 @@ function renderStaffList(staff) {
       unlink.textContent = "連携を解除";
       unlink.addEventListener("click", () => onUnlinkStaff(person));
       buttons.append(unlink);
+    } else {
+      // まだLINE連携していない人には、招待コードを発行して本人に渡す
+      const invite = document.createElement("button");
+      invite.type = "button";
+      invite.textContent = person.invite_expires_at ? "招待コードを再発行" : "招待コード";
+      invite.addEventListener("click", () => onInviteStaff(person));
+      buttons.append(invite);
     }
     const remove = document.createElement("button");
     remove.type = "button";
     remove.textContent = "外す";
     remove.addEventListener("click", () => onRemoveStaff(person));
     buttons.append(remove);
+    const erase = document.createElement("button");
+    erase.type = "button";
+    erase.className = "danger-outline";
+    erase.textContent = "完全に削除";
+    erase.addEventListener("click", () => onDeleteStaff(person));
+    buttons.append(erase);
 
     li.append(handle, info, buttons);
     els.staffList.append(li);
@@ -547,7 +531,7 @@ function setupSortable() {
       if (event.oldIndex === event.newIndex) return; // 動いていない
       const ids = [...els.staffList.children].map((li) => Number(li.dataset.id));
       try {
-        await api("/api/admin/staff/order", { method: "POST", body: { ids }, key: adminKey });
+        await adminApi("/api/admin/staff/order", { method: "POST", body: { ids } });
         setStaffMessage("並び順を保存しました", "success");
         await load(); // 一覧表も新しい順番で描き直す
       } catch (err) {
@@ -562,7 +546,7 @@ function setupSortable() {
 // 性別を保存して、一覧表の人数を数え直す
 async function onChangeGender(person, gender) {
   try {
-    await api("/api/admin/staff/gender", { method: "POST", body: { id: person.id, gender }, key: adminKey });
+    await adminApi("/api/admin/staff/gender", { method: "POST", body: { id: person.id, gender } });
     await load();
   } catch (err) {
     if (err instanceof AuthError) handleError(err);
@@ -573,7 +557,7 @@ async function onChangeGender(person, gender) {
 // レベルを保存して、一覧表を数え直す
 async function onChangeLevel(person, level) {
   try {
-    await api("/api/admin/staff/level", { method: "POST", body: { id: person.id, level }, key: adminKey });
+    await adminApi("/api/admin/staff/level", { method: "POST", body: { id: person.id, level } });
     await load();
   } catch (err) {
     if (err instanceof AuthError) handleError(err);
@@ -581,17 +565,131 @@ async function onChangeLevel(person, level) {
   }
 }
 
+// ---------------------------------------------------------
+// 招待コード（スタッフ用・管理者用）
+//   コードはこの画面で1回だけ表示する（サーバーには元に戻せない形でしか保存していない）
+// ---------------------------------------------------------
+async function onInviteStaff(person) {
+  try {
+    const res = await adminApi("/api/admin/staff/invite", { method: "POST", body: { id: person.id } });
+    showCode(
+      `${person.name} さんの招待コード`,
+      res.code,
+      `シフト提出の招待コードです。\n${res.code}\n公式アカウントのメニューから「シフト提出」を開いて、このコードを入れてください（${res.days}日間有効・1回だけ使えます）。\nこのコードは他の人に見せないでください。`
+    );
+    await load();
+  } catch (err) {
+    if (err instanceof AuthError || err.status === 403) handleError(err);
+    else setStaffMessage(err.message, "error");
+  }
+}
+
+async function onInviteAdmin() {
+  if (!confirm("管理者の招待コードを発行します。このコードを使った人は、全員の希望やシフトを見られる管理者になります。よろしいですか？")) {
+    return;
+  }
+  try {
+    const res = await adminApi("/api/admin/admins/invite", { method: "POST" });
+    showCode(
+      "管理者の招待コード",
+      res.code,
+      `シフトアプリの管理者の招待コードです。\n${res.code}\n${location.origin}/admin を開いてLINEでログインし、このコードを入れてください（${res.hours}時間有効・1回だけ使えます）。\nこのコードは他の人に見せないでください。`
+    );
+  } catch (err) {
+    if (err instanceof AuthError || err.status === 403) handleError(err);
+    else setAdminMessage(err.message, "error");
+  }
+}
+
+function showCode(title, code, message) {
+  els.codeTitle.textContent = title;
+  els.codeValue.textContent = code;
+  els.codeMessage.value = message;
+  els.codeCopyResult.textContent = "";
+  els.codeDialog.showModal();
+}
+
+async function copyCodeMessage() {
+  try {
+    await navigator.clipboard.writeText(els.codeMessage.value);
+    els.codeCopyResult.textContent = "コピーしました。本人にだけ、個別のトークで送ってください。";
+  } catch {
+    els.codeMessage.select(); // コピーできない環境では、文字を選んだ状態にする
+    els.codeCopyResult.textContent = "コピーできなかったので、選んだ状態にしました。長押しでコピーしてください。";
+  }
+}
+
+// 1人分のデータを完全に削除する（名前をもう一度入力して確認）
+async function onDeleteStaff(person) {
+  const typed = prompt(
+    `${person.name} さんの名前・希望・シフト・申請をすべて削除します。元に戻せません。\n本当に削除する場合は、名前「${person.name}」を入力してください。`
+  );
+  if (typed === null) return;
+  if (typed.trim() !== person.name) {
+    setStaffMessage("名前が一致しなかったので、削除しませんでした", "error");
+    return;
+  }
+  try {
+    await adminApi("/api/admin/staff/delete", { method: "POST", body: { id: person.id } });
+    setStaffMessage(`${person.name} さんのデータを削除しました`, "success");
+    await load();
+  } catch (err) {
+    if (err instanceof AuthError || err.status === 403) handleError(err);
+    else setStaffMessage(err.message, "error");
+  }
+}
+
+// ---------------------------------------------------------
+// 管理者の一覧
+// ---------------------------------------------------------
+function renderAdmins(admins) {
+  els.adminList.innerHTML = "";
+  for (const a of admins) {
+    const li = document.createElement("li");
+    const info = document.createElement("div");
+    info.innerHTML = `<div>${escapeHtml(a.name)}${a.is_me ? "（あなた）" : ""}</div><div class="hint" style="margin:0">${escapeHtml(
+      formatUpdated(a.added_at)
+    )} に登録</div>`;
+    li.append(info);
+    if (!a.is_me) {
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.textContent = "管理者から外す";
+      remove.addEventListener("click", () => onRemoveAdmin(a));
+      li.append(remove);
+    }
+    els.adminList.append(li);
+  }
+}
+
+async function onRemoveAdmin(a) {
+  if (!confirm(`${a.name} さんを管理者から外しますか？（この画面に入れなくなります）`)) return;
+  try {
+    await adminApi("/api/admin/admins/remove", { method: "POST", body: { line_user_id: a.line_user_id } });
+    setAdminMessage(`${a.name} さんを管理者から外しました`, "success");
+    await load();
+  } catch (err) {
+    if (err instanceof AuthError || err.status === 403) handleError(err);
+    else setAdminMessage(err.message, "error");
+  }
+}
+
+function setAdminMessage(text, type = "") {
+  els.adminMessage.textContent = text;
+  els.adminMessage.className = "message" + (type ? ` ${type}` : "");
+}
+
 // 間違ったLINEアカウントと結びついたときに解除する
 async function onUnlinkStaff(person) {
   if (
     !confirm(
-      `${person.name} さんとLINE「${person.line_name || ""}」の連携を解除しますか？（解除すると、もう一度名前を選び直せるようになります）`
+      `${person.name} さんとLINE「${person.line_name || ""}」の連携を解除しますか？（解除したら、新しい招待コードを発行して本人に渡してください）`
     )
   ) {
     return;
   }
   try {
-    await api("/api/admin/staff/unlink", { method: "POST", body: { id: person.id }, key: adminKey });
+    await adminApi("/api/admin/staff/unlink", { method: "POST", body: { id: person.id } });
     setStaffMessage(`${person.name} さんの連携を解除しました`, "success");
     await load();
   } catch (err) {
@@ -605,7 +703,7 @@ async function onAddStaff() {
   if (!name) return;
   els.staffAdd.disabled = true;
   try {
-    await api("/api/admin/staff", { method: "POST", body: { name }, key: adminKey });
+    await adminApi("/api/admin/staff", { method: "POST", body: { name } });
     els.staffName.value = "";
     setStaffMessage(`${name} さんを追加しました`, "success");
     await load();
@@ -620,10 +718,9 @@ async function onAddStaff() {
 async function onRemoveStaff(person) {
   if (!confirm(`${person.name} さんを一覧から外しますか？（これまでの提出データは残ります）`)) return;
   try {
-    await api("/api/admin/staff/deactivate", {
+    await adminApi("/api/admin/staff/deactivate", {
       method: "POST",
       body: { id: person.id },
-      key: adminKey,
     });
     setStaffMessage(`${person.name} さんを外しました`, "success");
     await load();

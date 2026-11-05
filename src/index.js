@@ -25,7 +25,8 @@ const REMINDER_DAYS = { 3: "3days", 1: "1day" };
 export default {
   // 決まった時刻にCloudflareが自動で呼ぶ関数（wrangler.jsonc の triggers で毎日12:00に設定）
   async scheduled(controller, env, ctx) {
-    ctx.waitUntil(runDailyReminder(env, new Date(controller.scheduledTime)));
+    const now = new Date(controller.scheduledTime);
+    ctx.waitUntil(Promise.all([runDailyReminder(env, now), purgeOldData(env, now)]));
   },
 
   // ブラウザからリクエストが来るたびに、この関数が呼ばれる
@@ -62,23 +63,53 @@ async function handleApi(request, env, url) {
   // 月ごとの締切情報
   if (path === "/api/periods" && method === "GET") return listPeriods();
 
-  // ---- 作成担当（管理者）向け：管理用の合言葉が必要 ----
-  if (path.startsWith("/api/admin/")) {
-    if (!env.ADMIN_KEY) {
-      return json(
-        { error: "サーバーに合言葉（ADMIN_KEY）が設定されていません。Cloudflareの設定を確認してください" },
-        503
-      );
-    }
-    if (!isAdminKey(request, env)) return json({ error: "合言葉が違います" }, 401);
+  // ---- ここから先は、LINEでの本人確認が必要（スタッフも管理者も） ----
+  if (!env.LINE_CHANNEL_ID) {
+    return json({ error: "LINE連携の設定（LINE_CHANNEL_ID）がまだです" }, 503);
+  }
+  const lineUser = await verifyLineUser(request, env);
+  if (!lineUser) {
+    return json(
+      { error: "LINEでの本人確認ができませんでした。開き直してください", code: "line_auth" },
+      401
+    );
+  }
 
-    if (path === "/api/admin/check" && method === "GET") return json({ ok: true });
+  // ---- 作成担当（管理者）向け：登録された管理者だけ ----
+  if (path.startsWith("/api/admin/")) {
+    // 管理者でなくても使えるもの：自分の状態の確認、最初の1人の登録、招待コードでの登録
+    if (path === "/api/admin/me" && method === "GET") return getAdminMe(env, lineUser);
+    if (path === "/api/admin/bootstrap" && method === "POST") {
+      return bootstrapAdmin(env, lineUser, await readJson(request));
+    }
+    if (path === "/api/admin/join" && method === "POST") {
+      return joinAdmin(env, lineUser, await readJson(request));
+    }
+
+    const admin = await adminOf(env, lineUser.sub);
+    if (!admin) {
+      return json({ error: "この画面は、登録された管理者だけが使えます", code: "not_admin" }, 403);
+    }
+
+    // 管理者の管理
+    if (path === "/api/admin/admins" && method === "GET") return listAdmins(env, admin);
+    if (path === "/api/admin/admins/invite" && method === "POST") return createAdminInvite(env, admin);
+    if (path === "/api/admin/admins/remove" && method === "POST") {
+      return removeAdmin(env, await readJson(request));
+    }
+
     if (path === "/api/admin/submissions" && method === "GET") return listSubmissions(env, url);
     if (path === "/api/admin/staff" && method === "POST") {
       return addStaff(env, await readJson(request));
     }
+    if (path === "/api/admin/staff/invite" && method === "POST") {
+      return createStaffInvite(env, admin, await readJson(request));
+    }
     if (path === "/api/admin/staff/deactivate" && method === "POST") {
       return deactivateStaff(env, await readJson(request));
+    }
+    if (path === "/api/admin/staff/delete" && method === "POST") {
+      return deleteStaffCompletely(env, await readJson(request));
     }
     if (path === "/api/admin/staff/level" && method === "POST") {
       return setStaffLevel(env, await readJson(request));
@@ -117,18 +148,7 @@ async function handleApi(request, env, url) {
     return json({ error: "見つかりません" }, 404);
   }
 
-  // ---- スタッフ向け：LINEでの本人確認が必要 ----
-  if (!env.LINE_CHANNEL_ID) {
-    return json({ error: "LINE連携の設定（LINE_CHANNEL_ID）がまだです" }, 503);
-  }
-  const lineUser = await verifyLineUser(request, env);
-  if (!lineUser) {
-    return json(
-      { error: "LINEでの本人確認ができませんでした。LINEから開き直してください", code: "line_auth" },
-      401
-    );
-  }
-
+  // ---- スタッフ向け ----
   // 自分の情報（名前と結びついているか）
   if (path === "/api/me" && method === "GET") return getMe(env, lineUser);
   if (path === "/api/me/link" && method === "POST") {
@@ -175,12 +195,6 @@ async function verifyLineUser(request, env) {
   return { sub: data.sub, name: data.name ?? "" };
 }
 
-// 管理用の合言葉が合っているか
-function isAdminKey(request, env) {
-  const given = request.headers.get("X-Access-Key") ?? "";
-  return Boolean(given) && safeEqual(given, env.ADMIN_KEY);
-}
-
 // 文字列を比べる（かかる時間から合言葉を推測されないようにする比べ方）
 function safeEqual(a, b) {
   const enc = new TextEncoder();
@@ -188,6 +202,168 @@ function safeEqual(a, b) {
   const y = enc.encode(b);
   if (x.length !== y.length) return false;
   return crypto.subtle.timingSafeEqual(x, y);
+}
+
+// =========================================================
+// 管理者（一覧画面・シフト作成画面に入れる人）
+//
+// ・管理者はLINEアカウントで登録する（共有の合言葉は使わない）
+// ・最初の1人だけは、Cloudflareに設定した合言葉（ADMIN_KEY）で登録する
+// ・2人目からは、管理者が発行した「管理者の招待コード」で登録する
+// =========================================================
+
+const STAFF_INVITE_DAYS = 7; // スタッフの招待コードの有効期限（日）
+const ADMIN_INVITE_HOURS = 24; // 管理者の招待コードの有効期限（時間）
+
+async function adminOf(env, lineUserId) {
+  return env.DB.prepare("SELECT line_user_id, name FROM admins WHERE line_user_id = ?")
+    .bind(lineUserId)
+    .first();
+}
+
+// 自分が管理者かどうか（管理者がまだ1人もいないなら、最初の登録ができることも返す）
+async function getAdminMe(env, lineUser) {
+  const [meRes, countRes] = await env.DB.batch([
+    env.DB.prepare("SELECT name FROM admins WHERE line_user_id = ?").bind(lineUser.sub),
+    env.DB.prepare("SELECT COUNT(*) AS n FROM admins"),
+  ]);
+  const hasAdmins = countRes.results[0].n > 0;
+  return json({
+    admin: meRes.results.length > 0,
+    line_name: lineUser.name,
+    can_bootstrap: !hasAdmins && Boolean(env.ADMIN_KEY),
+  });
+}
+
+// 最初の1人を登録する（管理者が0人のときだけ。合言葉が必要）
+async function bootstrapAdmin(env, lineUser, body) {
+  const limitKey = `bootstrap:${lineUser.sub}`;
+  if (await isLocked(env, limitKey)) return tooManyFailures();
+  if (!env.ADMIN_KEY) return json({ error: "サーバーに合言葉（ADMIN_KEY）が設定されていません" }, 503);
+
+  const key = String(body?.key ?? "");
+  if (!key || !safeEqual(key, env.ADMIN_KEY)) {
+    await recordFailure(env, limitKey);
+    return json({ error: "合言葉が違います" }, 400);
+  }
+  // 「まだ1人もいないとき」という条件つきで追加する（2人が同時に登録しようとしても1人だけになる）
+  const result = await env.DB.prepare(
+    `INSERT INTO admins (line_user_id, name)
+     SELECT ?, ? WHERE NOT EXISTS (SELECT 1 FROM admins)`
+  )
+    .bind(lineUser.sub, lineUser.name || "（名前なし）")
+    .run();
+  if (result.meta.changes !== 1) {
+    return json({ error: "すでに管理者が登録されています。管理者から招待コードをもらってください" }, 409);
+  }
+  await clearFailures(env, limitKey);
+  return json({ ok: true });
+}
+
+// 管理者の招待コードで、管理者として登録する
+async function joinAdmin(env, lineUser, body) {
+  if (await adminOf(env, lineUser.sub)) return json({ ok: true });
+  const limitKey = `admin-invite:${lineUser.sub}`;
+  if (await isLocked(env, limitKey)) return tooManyFailures();
+
+  const hash = await hashCode(body?.code);
+  if (hash) {
+    const valid = `code_hash = ? AND kind = 'admin' AND used_at IS NULL AND expires_at > datetime('now')`;
+    await env.DB.batch([
+      env.DB.prepare(
+        `INSERT OR IGNORE INTO admins (line_user_id, name, added_by)
+         SELECT ?, ?, created_by FROM invites WHERE ${valid}`
+      ).bind(lineUser.sub, lineUser.name || "（名前なし）", hash),
+      env.DB.prepare(`UPDATE invites SET used_at = datetime('now') WHERE ${valid}`).bind(hash),
+    ]);
+  }
+  if (!(await adminOf(env, lineUser.sub))) {
+    await recordFailure(env, limitKey);
+    return json({ error: "招待コードが正しくないか、期限が切れています" }, 400);
+  }
+  await clearFailures(env, limitKey);
+  return json({ ok: true });
+}
+
+async function listAdmins(env, admin) {
+  const { results } = await env.DB.prepare(
+    "SELECT line_user_id, name, added_at FROM admins ORDER BY added_at"
+  ).all();
+  return json({
+    admins: results.map((a) => ({ ...a, is_me: a.line_user_id === admin.line_user_id })),
+  });
+}
+
+async function createAdminInvite(env, admin) {
+  const code = newCode();
+  await env.DB.prepare(
+    `INSERT INTO invites (code_hash, kind, created_by, expires_at)
+     VALUES (?, 'admin', ?, datetime('now', '+${ADMIN_INVITE_HOURS} hours'))`
+  )
+    .bind(await hashCode(code), admin.line_user_id)
+    .run();
+  return json({ code, hours: ADMIN_INVITE_HOURS });
+}
+
+async function removeAdmin(env, body) {
+  const id = String(body?.line_user_id ?? "");
+  const { n } = await env.DB.prepare("SELECT COUNT(*) AS n FROM admins").first();
+  if (n <= 1) return json({ error: "最後の1人の管理者は削除できません" }, 400);
+  await env.DB.prepare("DELETE FROM admins WHERE line_user_id = ?").bind(id).run();
+  return json({ ok: true });
+}
+
+// =========================================================
+// 招待コードと、まちがえた回数の制限
+// =========================================================
+
+// 招待コード：読み間違えやすい文字（0とO、1とIなど）を除いた32種類の文字で8けた（例: K7P2-QX9M）
+const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+
+function newCode() {
+  const bytes = crypto.getRandomValues(new Uint8Array(8)); // 予測できない乱数
+  const chars = [...bytes].map((b) => CODE_CHARS[b % CODE_CHARS.length]).join("");
+  return `${chars.slice(0, 4)}-${chars.slice(4)}`;
+}
+
+// コードはそのまま保存せず、ハッシュ値（元に戻せない変換）にして保存・照合する
+async function hashCode(code) {
+  const normalized = String(code ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (normalized.length !== 8) return null;
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`shiftapp:${normalized}`));
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+// 60分のあいだに5回まちがえたら、しばらく受け付けない（総当たり対策）
+const FAIL_LIMIT = 5;
+const FAIL_WINDOW = "-60 minutes";
+
+async function isLocked(env, key) {
+  const row = await env.DB.prepare(
+    "SELECT count FROM auth_failures WHERE key = ? AND window_start > datetime('now', ?)"
+  )
+    .bind(key, FAIL_WINDOW)
+    .first();
+  return Boolean(row && row.count >= FAIL_LIMIT);
+}
+
+async function recordFailure(env, key) {
+  await env.DB.prepare(
+    `INSERT INTO auth_failures (key, count, window_start) VALUES (?, 1, datetime('now'))
+     ON CONFLICT (key) DO UPDATE SET
+       count        = CASE WHEN window_start > datetime('now', ?) THEN count + 1 ELSE 1 END,
+       window_start = CASE WHEN window_start > datetime('now', ?) THEN window_start ELSE datetime('now') END`
+  )
+    .bind(key, FAIL_WINDOW, FAIL_WINDOW)
+    .run();
+}
+
+async function clearFailures(env, key) {
+  await env.DB.prepare("DELETE FROM auth_failures WHERE key = ?").bind(key).run();
+}
+
+function tooManyFailures() {
+  return json({ error: "まちがえた回数が多いため、しばらく（1時間ほど）待ってからやり直してください" }, 429);
 }
 
 // =========================================================
@@ -200,42 +376,72 @@ async function staffOfLineUser(env, lineUserId) {
     .first();
 }
 
-// 自分がどの名前と結びついているか。まだなら、選べる名前の一覧も返す
+// 自分がどの名前と結びついているか
+// （名簿は外から見えないようにするため、まだの人にも名前の一覧は返さない）
 async function getMe(env, lineUser) {
   const me = await staffOfLineUser(env, lineUser.sub);
-  if (me) return json({ linked: true, staff: me, line_name: lineUser.name });
-
-  const { results } = await env.DB.prepare(
-    "SELECT id, name FROM staff WHERE active = 1 AND line_user_id IS NULL ORDER BY sort_order, id"
-  ).all();
-  return json({ linked: false, candidates: results, line_name: lineUser.name });
+  return json({ linked: Boolean(me), staff: me ?? null, line_name: lineUser.name });
 }
 
-// 名前を選んで、自分のLINEアカウントと結びつける（最初の1回だけ）
+// 招待コードを入れて、自分のLINEアカウントと名前を結びつける（最初の1回だけ）
 async function linkMe(env, lineUser, body) {
-  const staffId = body?.staff_id;
-  if (!Number.isInteger(staffId)) return json({ error: "名前を選んでください" }, 400);
-
+  if (body?.consent !== true) {
+    return json({ error: "個人情報の取り扱いへの同意が必要です" }, 400);
+  }
   if (await staffOfLineUser(env, lineUser.sub)) {
     return json({ error: "このLINEアカウントは、すでに名前が登録されています" }, 409);
   }
+  const limitKey = `invite:${lineUser.sub}`;
+  if (await isLocked(env, limitKey)) return tooManyFailures();
 
-  // まだ誰とも結びついていない名前のときだけ結びつける
-  // （「line_user_id IS NULL」の条件で、早い者勝ちの取り合いも防ぐ）
-  const result = await env.DB.prepare(
-    `UPDATE staff SET line_user_id = ?, line_name = ?
-      WHERE id = ? AND active = 1 AND line_user_id IS NULL`
-  )
-    .bind(lineUser.sub, lineUser.name || null, staffId)
-    .run();
-
-  if (result.meta.changes !== 1) {
-    return json(
-      { error: "その名前はすでに別のLINEアカウントで登録されています。作成担当に連絡してください" },
-      409
-    );
+  const hash = await hashCode(body?.code);
+  if (hash) {
+    // 「使われていない・期限内」の招待コードに対応する、まだ誰とも結びついていない名前だけを結びつける
+    // （2つの処理はまとめて実行されるので、同じコードを2人が同時に使っても1人にしか効かない）
+    const validInvite = `SELECT staff_id FROM invites
+                          WHERE code_hash = ? AND kind = 'staff' AND used_at IS NULL
+                            AND expires_at > datetime('now')`;
+    await env.DB.batch([
+      env.DB.prepare(
+        `UPDATE staff SET line_user_id = ?, line_name = ?, consented_at = datetime('now')
+          WHERE id = (${validInvite}) AND active = 1 AND line_user_id IS NULL`
+      ).bind(lineUser.sub, lineUser.name || null, hash),
+      env.DB.prepare(
+        `UPDATE invites SET used_at = datetime('now')
+          WHERE code_hash = ? AND used_at IS NULL
+            AND staff_id = (SELECT id FROM staff WHERE line_user_id = ?)`
+      ).bind(hash, lineUser.sub),
+    ]);
   }
-  return json({ ok: true });
+
+  const me = await staffOfLineUser(env, lineUser.sub);
+  if (!me) {
+    await recordFailure(env, limitKey);
+    return json({ error: "招待コードが正しくないか、期限が切れています。作成担当に確認してください" }, 400);
+  }
+  await clearFailures(env, limitKey);
+  return json({ ok: true, staff: me });
+}
+
+// 管理者用：スタッフの招待コードを発行する（前に出した使っていないコードは無効にする）
+async function createStaffInvite(env, admin, body) {
+  const id = Number(body?.id);
+  if (!Number.isInteger(id)) return json({ error: "idが正しくありません" }, 400);
+  const staff = await env.DB.prepare("SELECT id, line_user_id FROM staff WHERE id = ? AND active = 1")
+    .bind(id)
+    .first();
+  if (!staff) return json({ error: "そのスタッフは登録されていません" }, 400);
+  if (staff.line_user_id) return json({ error: "この人はすでにLINE連携済みです" }, 400);
+
+  const code = newCode();
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM invites WHERE kind = 'staff' AND staff_id = ? AND used_at IS NULL").bind(id),
+    env.DB.prepare(
+      `INSERT INTO invites (code_hash, kind, staff_id, created_by, expires_at)
+       VALUES (?, 'staff', ?, ?, datetime('now', '+${STAFF_INVITE_DAYS} days'))`
+    ).bind(await hashCode(code), id, admin.line_user_id),
+  ]);
+  return json({ code, days: STAFF_INVITE_DAYS });
 }
 
 // 管理者用：結びつけを解除する（間違えて登録したとき用）
@@ -407,11 +613,13 @@ async function saveStaffOrder(env, body) {
 async function deactivateStaff(env, body) {
   const id = Number(body?.id);
   if (!Number.isInteger(id)) return json({ error: "idが正しくありません" }, 400);
-  await env.DB.prepare(
-    "UPDATE staff SET active = 0, line_user_id = NULL, line_name = NULL WHERE id = ?"
-  )
-    .bind(id)
-    .run();
+  await env.DB.batch([
+    env.DB.prepare(
+      `UPDATE staff SET active = 0, line_user_id = NULL, line_name = NULL, deactivated_at = datetime('now')
+        WHERE id = ?`
+    ).bind(id),
+    env.DB.prepare("DELETE FROM invites WHERE staff_id = ? AND used_at IS NULL").bind(id),
+  ]);
   return json({ ok: true });
 }
 
@@ -522,7 +730,10 @@ async function listSubmissions(env, url) {
 
   const [staffRes, subRes, dayRes, reqRes, remindRes, rulesRes] = await env.DB.batch([
     env.DB.prepare(
-      `SELECT id, name, gender, level, line_name, line_user_id IS NOT NULL AS linked
+      `SELECT id, name, gender, level, line_name, line_user_id IS NOT NULL AS linked, consented_at,
+              (SELECT MAX(expires_at) FROM invites i
+                WHERE i.kind = 'staff' AND i.staff_id = staff.id AND i.used_at IS NULL
+                  AND i.expires_at > datetime('now')) AS invite_expires_at
          FROM staff WHERE active = 1 ORDER BY sort_order, id`
     ),
     env.DB.prepare("SELECT * FROM submissions WHERE period = ?").bind(period),
@@ -753,6 +964,86 @@ async function getPublishedSchedule(env, url, me) {
     staff: data.staff,
     assignments: data.assignments,
   });
+}
+
+// =========================================================
+// 古いデータの削除（個人情報を必要以上に持ち続けないため）
+//
+// ・6か月より前の月の、希望・シフト・申請・リマインドの記録
+// ・一覧から外してから6か月たったスタッフの情報
+// ・使い終わった／期限切れの招待コード、古い失敗回数の記録
+// 毎日の定期実行（scheduled）で呼ばれる
+// =========================================================
+const KEEP_MONTHS = 6;
+
+// これより前の月のデータを消す、という境目の月（例：2026年11月なら "2026-05"）
+export function retentionCutoff(now) {
+  const jst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+  const d = new Date(Date.UTC(jst.getUTCFullYear(), jst.getUTCMonth() - KEEP_MONTHS, 1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+async function purgeOldData(env, now) {
+  try {
+    const cutoff = retentionCutoff(now);
+    await env.DB.batch([
+      env.DB.prepare(
+        "DELETE FROM availability WHERE submission_id IN (SELECT id FROM submissions WHERE period < ?)"
+      ).bind(cutoff),
+      env.DB.prepare("DELETE FROM submissions WHERE period < ?").bind(cutoff),
+      env.DB.prepare("DELETE FROM change_requests WHERE period < ?").bind(cutoff),
+      env.DB.prepare("DELETE FROM assignments WHERE period < ?").bind(cutoff),
+      env.DB.prepare("DELETE FROM schedules WHERE period < ?").bind(cutoff),
+      env.DB.prepare("DELETE FROM reminder_log WHERE period < ?").bind(cutoff),
+      env.DB.prepare(
+        "DELETE FROM invites WHERE used_at IS NOT NULL OR expires_at < datetime('now', '-7 days')"
+      ),
+      env.DB.prepare("DELETE FROM auth_failures WHERE window_start < datetime('now', '-1 day')"),
+    ]);
+
+    // 外してから6か月たった人は、その人のデータごと削除する
+    const { results } = await env.DB.prepare(
+      `SELECT id FROM staff WHERE active = 0 AND deactivated_at < datetime('now', '-${KEEP_MONTHS} months')`
+    ).all();
+    for (const row of results) await deleteStaffData(env, row.id);
+  } catch (err) {
+    console.error("古いデータの削除に失敗しました", err);
+  }
+}
+
+// 管理者用：1人分のデータを完全に削除する（辞めた人から「消してほしい」と言われたときなど）
+async function deleteStaffCompletely(env, body) {
+  const id = Number(body?.id);
+  if (!Number.isInteger(id)) return json({ error: "idが正しくありません" }, 400);
+  await deleteStaffData(env, id);
+  return json({ ok: true });
+}
+
+async function deleteStaffData(env, staffId) {
+  await env.DB.batch([
+    env.DB.prepare(
+      "DELETE FROM availability WHERE submission_id IN (SELECT id FROM submissions WHERE staff_id = ?)"
+    ).bind(staffId),
+    env.DB.prepare("DELETE FROM submissions WHERE staff_id = ?").bind(staffId),
+    env.DB.prepare("DELETE FROM change_requests WHERE staff_id = ?").bind(staffId),
+    env.DB.prepare("DELETE FROM assignments WHERE staff_id = ?").bind(staffId),
+    env.DB.prepare("DELETE FROM invites WHERE staff_id = ?").bind(staffId),
+    env.DB.prepare("DELETE FROM staff WHERE id = ?").bind(staffId),
+  ]);
+
+  // 公開済みのシフト（コピー）からも、その人の名前とシフトを消す
+  const { results } = await env.DB.prepare(
+    "SELECT period, published_data FROM schedules WHERE published_data IS NOT NULL"
+  ).all();
+  for (const row of results) {
+    const data = JSON.parse(row.published_data);
+    if (!data.staff.some((p) => p.id === staffId)) continue;
+    data.staff = data.staff.filter((p) => p.id !== staffId);
+    data.assignments = data.assignments.filter((a) => a.staff_id !== staffId);
+    await env.DB.prepare("UPDATE schedules SET published_data = ? WHERE period = ?")
+      .bind(JSON.stringify(data), row.period)
+      .run();
+  }
 }
 
 // =========================================================
@@ -999,7 +1290,8 @@ function json(data, status = 200) {
     status,
     headers: {
       "Content-Type": "application/json; charset=utf-8",
-      "Cache-Control": "no-store",
+      "Cache-Control": "no-store", // 個人情報を含む返事を、途中やブラウザに保存させない
+      "X-Content-Type-Options": "nosniff",
     },
   });
 }

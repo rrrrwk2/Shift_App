@@ -1,0 +1,24 @@
+# ブラウザ向けのセキュリティ設定（Cloudflareが画面のファイルを返すときに付ける）
+
+# すべての画面
+/*
+  # ファイルの種類を勝手に推測させない
+  X-Content-Type-Options: nosniff
+  # ほかのサイトに移動したとき、こちらのURLの細かい部分を渡さない
+  Referrer-Policy: strict-origin-when-cross-origin
+  # カメラ・マイク・位置情報などは使わない
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=()
+
+# 管理画面：ほかのサイトに埋め込ませない（だまして操作させる攻撃の対策）、ブラウザに保存させない
+/admin
+  X-Frame-Options: DENY
+  Cache-Control: no-store
+/admin.html
+  X-Frame-Options: DENY
+  Cache-Control: no-store
+/shift
+  X-Frame-Options: DENY
+  Cache-Control: no-store
+/shift.html
+  X-Frame-Options: DENY
+  Cache-Control: no-store

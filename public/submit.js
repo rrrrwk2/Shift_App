@@ -16,7 +16,8 @@ const els = {
   bootReload: $("boot-reload"),
   linkSection: $("link-section"),
   linkHint: $("link-hint"),
-  linkSelect: $("link-select"),
+  linkCode: $("link-code"),
+  linkConsent: $("link-consent"),
   linkButton: $("link-button"),
   linkMessage: $("link-message"),
   app: $("app"),
@@ -190,34 +191,25 @@ function showLinkSection(me) {
   els.bootSection.hidden = true;
   els.app.hidden = true;
   els.linkSection.hidden = false;
-  els.linkHint.textContent = `LINE「${me.line_name || "あなた"}」さんとして登録します。最初の1回だけです。一度登録すると、この名前では他の人は提出できなくなります。間違えたときは作成担当に連絡してください。`;
-
-  els.linkSelect.innerHTML = '<option value="">選んでください</option>';
-  for (const s of me.candidates) {
-    const opt = document.createElement("option");
-    opt.value = s.id;
-    opt.textContent = s.name;
-    els.linkSelect.append(opt);
-  }
-  if (me.candidates.length === 0) {
-    els.linkMessage.textContent =
-      "選べる名前がありません。作成担当に、名簿への登録をお願いしてください。";
-    els.linkButton.disabled = true;
-  }
+  els.linkHint.textContent = `LINE「${me.line_name || "あなた"}」さんとして登録します。最初の1回だけです。`;
+  els.linkCode.focus();
 }
 
 async function onLink() {
-  const staffId = Number(els.linkSelect.value);
-  if (!staffId) {
-    els.linkMessage.textContent = "名前を選んでください";
+  const code = els.linkCode.value.trim();
+  if (!code) {
+    els.linkMessage.textContent = "招待コードを入れてください";
     return;
   }
-  const name = els.linkSelect.selectedOptions[0].textContent;
-  if (!confirm(`「${name}」として登録します。よろしいですか？`)) return;
+  if (!els.linkConsent.checked) {
+    els.linkMessage.textContent = "個人情報の取り扱いへの同意にチェックを入れてください";
+    return;
+  }
 
   els.linkButton.disabled = true;
+  els.linkMessage.textContent = "";
   try {
-    await api("/api/me/link", { method: "POST", body: { staff_id: staffId }, token: idToken });
+    await api("/api/me/link", { method: "POST", body: { code, consent: true }, token: idToken });
     await loadMe();
   } catch (err) {
     els.linkMessage.textContent = err.message;
