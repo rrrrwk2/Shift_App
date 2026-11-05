@@ -37,6 +37,7 @@ const els = {
   maxDays: $("max-days"),
   note: $("note"),
   submitButton: $("submit-button"),
+  draftButton: $("draft-button"),
   cancelEditButton: $("cancel-edit-button"),
   formMessage: $("form-message"),
   // 完了画面
@@ -93,6 +94,7 @@ async function init() {
   els.defaultStart.addEventListener("input", renderDayList);
   els.defaultEnd.addEventListener("input", renderDayList);
   els.formView.addEventListener("submit", onSubmit);
+  els.draftButton.addEventListener("click", onSaveDraft);
   els.cancelEditButton.addEventListener("click", () => showView("done"));
   els.editButton.addEventListener("click", startEditing);
   els.requestButtonDone.addEventListener("click", startRequest);
@@ -354,13 +356,23 @@ async function refresh() {
 // 状況に合わせて、どの画面を出すか決める
 function decideView() {
   if (!current) return;
+  hideFlash(); // 前に出ていたお知らせを消してから、画面に合ったものを出す
   renderMyRequests();
-  if (current.submission) {
+  const sub = current.submission;
+  if (sub?.submitted_at) {
+    // 提出済み
     renderDone();
     showView("done");
   } else if (current.can_edit) {
-    loadIntoForm(null);
+    // まだ提出していない（下書きがあれば、その続きから）
+    loadIntoForm(sub, { draft: Boolean(sub) });
     showView("form");
+    if (sub) {
+      showFlash(
+        `保存した下書き（${formatUpdated(sub.updated_at)}）を表示しています。まだ提出されていないので、最後に「この内容で送信する」を押してください。`,
+        "info"
+      );
+    }
   } else {
     els.closedText.textContent = `${formatPeriod(els.periodSelect.value)}分の提出期限（${current.period_info.deadline}）を過ぎているため、ここからは提出できません。入れる日がある場合は、変更の申請で作成担当に伝えてください。`;
     showView("closed");
@@ -468,7 +480,9 @@ function startEditing() {
 // ---------------------------------------------------------
 
 // 入力欄に内容を入れる（sub が null なら空の状態にする）
-function loadIntoForm(sub) {
+// sub: 入れる内容（null なら空）
+// draft: sub が「下書き」か（下書きなら、提出前と同じ扱いにする）
+function loadIntoForm(sub, { draft = false } = {}) {
   setFormMessage("");
   days = new Map();
   els.defaultStart.value = sub ? sub.default_start ?? "" : "17:00";
@@ -483,9 +497,12 @@ function loadIntoForm(sub) {
       end_time: d.end_time ?? "",
     });
   }
-  // 修正中のときだけ「修正をやめる」を出す
-  els.cancelEditButton.hidden = !sub;
-  els.submitButton.textContent = sub ? "修正して送信する" : "この内容で送信する";
+  // 提出済みの内容を修正しているときだけ「修正をやめる」を出す
+  const editingSubmitted = Boolean(sub) && !draft;
+  els.cancelEditButton.hidden = !editingSubmitted;
+  els.submitButton.textContent = editingSubmitted ? "修正して送信する" : "この内容で送信する";
+  // 下書きの保存は、まだ提出していないときだけ（提出済みのものは下書きに戻せない）
+  els.draftButton.hidden = editingSubmitted;
   renderCalendar();
   renderDayList();
 }
@@ -584,28 +601,15 @@ async function onSubmit(event) {
   event.preventDefault(); // ページが再読み込みされないようにする
   setFormMessage("");
 
-  // 誰の分かはサーバーがLINEの本人確認で決めるので、名前は送らない
-  const body = {
-    period: els.periodSelect.value,
-    default_start: els.defaultStart.value,
-    default_end: els.defaultEnd.value,
-    min_days_per_week: els.minDays.value ? Number(els.minDays.value) : null,
-    max_days_per_week: els.maxDays.value ? Number(els.maxDays.value) : null,
-    note: els.note.value.trim(),
-    days: [...days.keys()].sort().map((date) => ({
-      date,
-      status: days.get(date).status,
-      start_time: days.get(date).start_time,
-      end_time: days.get(date).end_time,
-    })),
-  };
+  const body = formBody();
 
   els.submitButton.disabled = true;
   try {
-    await api("/api/submission", { method: "POST", body, token: idToken });
+    const res = await api("/api/submission", { method: "POST", body, token: idToken });
     // 送信できたら完了画面に切り替える
     await refresh();
     els.doneTitle.textContent = "提出しました！";
+    if (res.notified) showFlash("提出した内容の控えを、LINEのトークにも送りました。");
     window.scrollTo({ top: 0, behavior: "smooth" });
   } catch (err) {
     if (err instanceof AuthError) {
@@ -620,6 +624,47 @@ async function onSubmit(event) {
   } finally {
     els.submitButton.disabled = false;
   }
+}
+
+// 「下書きを保存」：入れた内容をサーバーに保存する（提出したことにはならない）
+async function onSaveDraft() {
+  setFormMessage("");
+  els.draftButton.disabled = true;
+  try {
+    await api("/api/submission", { method: "POST", body: { ...formBody(), draft: true }, token: idToken });
+    const now = new Date();
+    setFormMessage(
+      `下書きを保存しました（${pad2(now.getHours())}:${pad2(now.getMinutes())}）。まだ提出されていません。続きはあとからでもできます。`,
+      "success"
+    );
+  } catch (err) {
+    if (err instanceof AuthError) handleError(err);
+    else if (err.status === 403) {
+      await refresh();
+      showFlash(err.message, "error");
+    } else setFormMessage(err.message, "error");
+  } finally {
+    els.draftButton.disabled = false;
+  }
+}
+
+// 入力欄の内容を、サーバーに送る形にまとめる
+// （誰の分かはサーバーがLINEの本人確認で決めるので、名前は送らない）
+function formBody() {
+  return {
+    period: els.periodSelect.value,
+    default_start: els.defaultStart.value,
+    default_end: els.defaultEnd.value,
+    min_days_per_week: els.minDays.value ? Number(els.minDays.value) : null,
+    max_days_per_week: els.maxDays.value ? Number(els.maxDays.value) : null,
+    note: els.note.value.trim(),
+    days: [...days.keys()].sort().map((date) => ({
+      date,
+      status: days.get(date).status,
+      start_time: days.get(date).start_time,
+      end_time: days.get(date).end_time,
+    })),
+  };
 }
 
 // ---------------------------------------------------------

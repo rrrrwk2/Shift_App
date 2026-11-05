@@ -21,6 +21,7 @@ const els = {
   checkAllLabel: $("check-all-label"),
   checkAll: $("check-all"),
   remindMessage: $("remind-message"),
+  lineQuota: $("line-quota"),
   requestsCard: $("requests-card"),
   requestsTitle: $("requests-title"),
   requestsList: $("requests-list"),
@@ -87,16 +88,21 @@ async function load() {
   const period = els.periodSelect.value;
   try {
     const data = await adminApi(`/api/admin/submissions?period=${period}`);
+    drafts = new Set(data.drafts ?? []);
     renderGrid(period, data.staff, data.submissions, data.period_info, data.rules);
     renderRulesForm(data.rules);
     renderRequests(data.change_requests);
     renderReminders(data);
+    loadLineQuota(); // 待たずに裏で読み込む（LINEに問い合わせるので少し時間がかかる）
     renderStaffList(data.staff);
     renderAdmins((await adminApi("/api/admin/admins")).admins);
   } catch (err) {
     handleError(err);
   }
 }
+
+// 下書きだけ保存して、まだ提出していない人（staff_id の集まり）
+let drafts = new Set();
 
 function renderGrid(period, staff, submissions, periodInfo, rules) {
   const total = daysInMonth(period);
@@ -123,7 +129,7 @@ function renderGrid(period, staff, submissions, periodInfo, rules) {
     body += `<tr class="${sub ? "" : "unsubmitted"}"><td class="name">${escapeHtml(person.name)}</td>`;
     body += `<td>${GENDER_SHORT[person.gender] ?? "-"}</td>`;
     body += `<td class="${person.level === "veteran" ? "level-veteran" : ""}">${LEVEL_SHORT[person.level] ?? "-"}</td>`;
-    body += `<td>${sub ? weeklyText(sub) : "未提出"}</td>`;
+    body += `<td>${sub ? weeklyText(sub) : drafts.has(person.id) ? "下書き中" : "未提出"}</td>`;
     body += `<td>${sub ? escapeHtml(formatRange(sub.default_start, sub.default_end) || "-") : ""}</td>`;
     for (const date of dates) {
       const d = dayMap.get(date);
@@ -320,7 +326,7 @@ function renderReminders(data) {
     box.disabled = !person.linked || !remindAvailable;
     box.addEventListener("change", updateRemindButton);
     const name = document.createElement("span");
-    name.textContent = person.name;
+    name.textContent = person.name + (drafts.has(person.id) ? "（下書き中）" : "");
     label.append(box, name);
     if (!person.linked) {
       const note = document.createElement("span");
@@ -379,6 +385,28 @@ async function onRemindNow() {
     if (err instanceof AuthError) handleError(err);
     else setRemindMessage(err.message, "error");
     updateRemindButton();
+  }
+}
+
+// 今月のLINEの送信数（無料プランは月200通まで）
+async function loadLineQuota() {
+  try {
+    const q = await adminApi("/api/admin/line-quota");
+    if (!q.ready) {
+      els.lineQuota.textContent = "";
+      return;
+    }
+    if (q.error) {
+      els.lineQuota.textContent = `今月のLINE送信数：${q.error}`;
+      return;
+    }
+    const limit = q.limit ? ` / ${q.limit}通` : "通";
+    const left = q.limit ? q.limit - q.used : null;
+    els.lineQuota.textContent =
+      `今月のLINE送信数：${q.used}${limit}` + (left !== null && left < 30 ? `（残り${left}通。足りなくなると送れなくなります）` : "");
+    els.lineQuota.classList.toggle("status-alert", left !== null && left < 30);
+  } catch {
+    els.lineQuota.textContent = "";
   }
 }
 

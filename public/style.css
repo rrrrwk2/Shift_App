@@ -1145,3 +1145,13 @@ table.view-grid tr.me-row td.on {
   color: var(--muted);
   font-size: 0.8rem;
 }
+
+/* お知らせ（成功・エラー以外の、ふつうの案内） */
+.message.info {
+  color: var(--sat);
+}
+
+.hint.status-alert {
+  color: var(--danger);
+  font-weight: 600;
+}

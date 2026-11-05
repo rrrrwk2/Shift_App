@@ -7,6 +7,7 @@
 // =========================================================
 
 let adminToken = ""; // LINEが発行した本人の証明書。サーバーへのリクエストに付ける
+let adminName = ""; // ログインしている管理者のLINEの表示名
 
 // 画面に必要な部品（各画面のHTMLに同じidで置いてある）
 const authEls = {
@@ -47,6 +48,7 @@ async function adminLogin(onReady) {
     if (me.admin) {
       authEls.section.hidden = true;
       authEls.content.hidden = false;
+      adminName = me.line_name || "";
       renderUserBar(me.line_name);
       await onReady();
       return;

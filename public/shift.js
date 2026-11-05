@@ -63,6 +63,7 @@ async function init() {
   await adminLogin(async () => {
     fillPeriodSelect(els.periodSelect, await api("/api/periods"));
     await load();
+    watchOtherEdits();
   });
 }
 
@@ -100,6 +101,29 @@ async function load() {
   }
 }
 
+// ---------------------------------------------------------
+// ほかの管理者の変更を反映する
+//   30秒ごと（と、この画面に戻ってきたとき）に下書きの「変更の番号」を確かめて、
+//   変わっていたら読み込み直す。マスを編集している最中は待つ
+// ---------------------------------------------------------
+function watchOtherEdits() {
+  const check = async () => {
+    if (!state || document.hidden || els.dialog.open) return;
+    try {
+      const sch = await adminApi(`/api/admin/schedule?period=${state.period}`);
+      if (sch.schedule.draft_version === state.schedule.draft_version) return;
+      await load();
+      if (sch.schedule.updated_by && sch.schedule.updated_by !== adminName) {
+        setMessage(`${sch.schedule.updated_by}さんの変更を反映しました`, "success");
+      }
+    } catch {
+      // 通信できなかったときは、次の確認まで待つ
+    }
+  };
+  setInterval(check, 30 * 1000);
+  document.addEventListener("visibilitychange", check);
+}
+
 function render() {
   renderStatus();
   renderGrid();
@@ -110,8 +134,10 @@ function render() {
 // ---------------------------------------------------------
 function renderStatus() {
   const { schedule, shifts } = state;
+  // 下書きは、マスを変えるたびに自動で保存されている（保存ボタンはいらない）
+  const by = schedule.updated_by ? ` ${schedule.updated_by}さん` : "";
   const draft = schedule.exists
-    ? `下書き：${shifts.size}コマ（最終更新 ${formatUpdated(schedule.updated_at)}）`
+    ? `下書き：${shifts.size}コマ（自動保存済み・最終更新 ${formatUpdated(schedule.updated_at)}${by}）`
     : "下書き：まだありません";
   let pub = "公開：まだ";
   if (schedule.published_at) {
