@@ -1112,3 +1112,36 @@ table.view-grid tr.me-row td.on {
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
+
+/* 個人情報の取り扱い（文章が長いので、枠の中でスクロールさせる） */
+.privacy-notice {
+  max-height: 320px;
+  overflow-y: auto;
+  line-height: 1.7;
+}
+
+.privacy-notice h3 {
+  margin: 0 0 8px;
+  font-size: 0.95rem;
+}
+
+.privacy-notice h4 {
+  margin: 14px 0 4px;
+  font-size: 0.85rem;
+}
+
+.privacy-notice p {
+  margin: 0 0 6px;
+}
+
+.privacy-notice ul {
+  margin: 0 0 6px;
+  padding-left: 1.3em;
+}
+
+.privacy-notice .privacy-date {
+  margin-top: 14px;
+  text-align: right;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
