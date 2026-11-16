@@ -73,12 +73,12 @@
             <label>男性<input id="rule-male" type="number" min="0" max="99" inputmode="numeric" />人以上</label>
             <label>女性<input id="rule-female" type="number" min="0" max="99" inputmode="numeric" />人以上</label>
           </div>
-          <p class="hint" style="margin: 12px 0 6px">チェックしない曜日（定休日などの設定）</p>
+          <p class="hint" style="margin: 12px 0 6px"><strong>定休日（毎週）</strong>：お店が休みの曜日。スタッフはその日を選べなくなり、表ではグレーになる。</p>
           <div id="rule-closed" class="weekday-checks"></div>
 
           <!-- 特定の日だけ人数を変える（クリスマス・年末など） -->
           <p class="hint" style="margin: 14px 0 6px">
-            <strong>特定の日だけの設定</strong>：クリスマスや年末など、その日だけ人数を変える。空欄の項目はいつもどおり。
+            <strong>特定の日だけの設定</strong>：クリスマスや年末など、その日だけ人数を変える。空欄の項目はいつもどおり。年末年始などの休みは「定休日」にチェック（毎週の定休日の曜日でも、ここに追加してチェックを外せば営業日になる）。
           </p>
           <ul id="rule-dates" class="date-rules"></ul>
           <button id="rule-date-add" type="button">日付を追加</button>
@@ -97,7 +97,7 @@
           <span class="legend-box good"></span>条件どおり
           <span class="legend-box warn"></span>1人足りない・多い（または△の人も入れば足りる）
           <span class="legend-box ng"></span>2人以上足りない・多い
-          ／ 日付の＊はその日だけの設定あり
+          ／ 日付の＊はその日だけの設定あり、「休」は定休日
         </p>
 
         <!-- ルールを満たさない日の一覧 -->

@@ -39,22 +39,32 @@ const MIN_ITEMS = [
   { key: "veteran", rule: "min_veteran", label: "ベテラン" },
 ];
 
-// 表の日付の見出し（判定の色。祝日は「祝」、その日だけの設定がある日は「＊」）
+// 表の日付の見出し（判定の色。祝日は「祝」、定休日は「休」、その日だけの設定がある日は「＊」）
 function dayHeaderCell(date, judge) {
   const wd = weekdayOf(date);
   const holiday = isHoliday(date);
   const dayCls = wd === 0 || holiday ? "sun" : wd === 6 ? "sat" : "";
   const notes = judge.items.map((i) => i.text);
   if (judge.special) notes.unshift("この日だけの設定あり");
+  if (judge.closed) notes.unshift("定休日");
   const mark = judge.special ? '<span class="special-mark">＊</span>' : "";
-  return `<th class="${dayCls} ${judge.level}" title="${escapeHtml(notes.join("、"))}">${Number(
-    date.slice(-2)
-  )}${mark}<br>${holiday ? "祝" : WEEKDAYS[wd]}</th>`;
+  const label = judge.closed ? "休" : holiday ? "祝" : WEEKDAYS[wd];
+  return `<th class="${dayCls} ${judge.closed ? "closed" : judge.level}" title="${escapeHtml(
+    notes.join("、")
+  )}">${Number(date.slice(-2))}${mark}<br>${label}</th>`;
 }
 
 // その日だけの設定（なければ undefined）
 function specialOf(date, rules) {
   return rules.date_overrides?.[date];
+}
+
+// お店の定休日か
+//   その日だけの設定があればそれに従う（毎週の定休日の曜日でも、設定で定休日を外せば営業日）
+//   なければ毎週の定休日（closed_weekdays）
+function isClosedDay(date, rules) {
+  const special = specialOf(date, rules);
+  return special ? !!special.closed : rules.closed_weekdays.includes(weekdayOf(date));
 }
 
 // その日の定員（その日だけの設定 → 祝日の人数 → 曜日の人数 の順に見る）
@@ -73,10 +83,12 @@ function minOf(date, rules, ruleKey) {
 }
 
 function judgeDay(date, count, rules) {
-  const special = specialOf(date, rules);
-  const result = { level: "", items: [], targets: {}, checks: {}, special: !!special };
-  // チェックしない日：その日だけの設定で「休み」、または設定がなくてチェックしない曜日
-  if (special ? special.closed : rules.closed_weekdays.includes(weekdayOf(date))) return result;
+  const result = { level: "", items: [], targets: {}, checks: {}, special: !!specialOf(date, rules), closed: false };
+  // 定休日はチェックしない
+  if (isClosedDay(date, rules)) {
+    result.closed = true;
+    return result;
+  }
 
   // 項目の判定を記録する（問題があるものは items にも入れる）
   const add = (key, label, level, text = "") => {

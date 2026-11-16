@@ -106,7 +106,12 @@ async function load() {
   try {
     const data = await adminApi(`/api/admin/submissions?period=${period}`);
     drafts = new Set(data.drafts ?? []);
-    gridData = { period, staff: data.staff, subs: new Map(data.submissions.map((s) => [s.staff_id, s])) };
+    gridData = {
+      period,
+      staff: data.staff,
+      subs: new Map(data.submissions.map((s) => [s.staff_id, s])),
+      rules: data.rules,
+    };
     renderGrid(period, data.staff, data.submissions, data.period_info, data.rules);
     renderRulesForm(data.rules);
     renderRequests(data.change_requests);
@@ -125,10 +130,15 @@ function onGridClick(e) {
   const edit = e.target.closest("[data-edit-staff]");
   if (edit) {
     const person = gridData.staff.find((p) => p.id === Number(edit.dataset.editStaff));
-    openWishEditor(person, gridData.period, gridData.subs.get(person.id) ?? null, async (message) => {
+    const { period, rules } = gridData;
+    const closedDates = new Set(
+      Array.from({ length: daysInMonth(period) }, (_, i) => toDate(period, i + 1)).filter((d) => isClosedDay(d, rules))
+    );
+    const onSaved = async (message) => {
       await load();
       els.summary.textContent = `${message} ・ ${els.summary.textContent}`;
-    });
+    };
+    openWishEditor(person, period, gridData.subs.get(person.id) ?? null, onSaved, closedDates);
     return;
   }
   const note = e.target.closest("[data-note-staff]");
@@ -160,6 +170,9 @@ function renderGrid(period, staff, submissions, periodInfo, rules) {
   const newCounter = () => ({ all: zero(), male: zero(), female: zero(), veteran: zero() });
   const count = { ok: newCounter(), maybe: newCounter() };
 
+  // 定休日（グレーにする。希望が残っていても人数には数えない）
+  const closed = new Set(dates.filter((d) => isClosedDay(d, rules)));
+
   // ---- 1人1行（先に数えてから見出しを作るので、行は別にためておく） ----
   let body = "<tbody>";
   let submittedCount = 0;
@@ -178,6 +191,10 @@ function renderGrid(period, staff, submissions, periodInfo, rules) {
     body += `<td>${sub ? escapeHtml(formatRange(sub.default_start, sub.default_end) || "-") : ""}</td>`;
     for (const date of dates) {
       const d = dayMap.get(date);
+      if (closed.has(date)) {
+        body += `<td class="closed">${d ? (d.status === "ok" ? "○" : "△") : ""}</td>`;
+        continue;
+      }
       if (!d) {
         body += "<td></td>";
         continue;
@@ -222,7 +239,7 @@ function renderGrid(period, staff, submissions, periodInfo, rules) {
   const footRow = (label, values, cls = "", ruleKey = null) => {
     let row = `<tr class="${cls}"><td class='name'>${label}</td><td colspan='4'></td>`;
     for (const date of dates) {
-      const level = ruleKey ? judged[date].checks[ruleKey] ?? "" : "";
+      const level = judged[date].closed ? "closed" : ruleKey ? judged[date].checks[ruleKey] ?? "" : "";
       const target = ruleKey ? judged[date].targets[ruleKey] : null;
       const text = values[date] || (target != null ? "0" : "");
       row += `<td class="${level}">${text}${
@@ -305,7 +322,7 @@ function renderRulesForm(rules) {
   for (const date of Object.keys(overrides).sort()) els.ruleDates.append(dateRuleRow(date, overrides[date]));
 }
 
-// 特定の日の設定の1行（日付・定員・ベテラン・男性・女性・休み・削除）
+// 特定の日の設定の1行（日付・定員・ベテラン・男性・女性・定休日・削除）
 const DATE_RULE_FIELDS = [
   ["capacity", "定員", "人"],
   ["min_veteran", "ベテラン", "人以上"],
@@ -321,7 +338,7 @@ function dateRuleRow(date, rule) {
       ([field, label, unit]) =>
         `<label>${label}<input type="number" min="0" max="99" inputmode="numeric" data-field="${field}" />${unit}</label>`
     ).join("")}
-    <label class="check-row"><input type="checkbox" data-field="closed" />休み（チェックしない）</label>
+    <label class="check-row"><input type="checkbox" data-field="closed" />定休日</label>
     <button type="button" class="date-rule-remove danger-outline">削除</button>`;
   li.querySelector("input[type=date]").value = date;
   for (const [field] of DATE_RULE_FIELDS) li.querySelector(`[data-field="${field}"]`).value = rule[field] ?? "";

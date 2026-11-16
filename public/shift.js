@@ -44,6 +44,7 @@ let state = null;
 //   shifts:  Map("staffId|date" → { start_time, end_time })           … 下書き
 // }
 let editing = null; // ダイアログで編集中のマス { staffId, date }
+let cutInfo = new Map(); // 削った日の説明（staff_id → 文章。renderGrid で作る）
 
 const keyOf = (staffId, date) => `${staffId}|${date}`;
 
@@ -59,6 +60,11 @@ async function init() {
     const noteButton = e.target.closest("[data-note-staff]");
     if (noteButton) {
       showNote(Number(noteButton.dataset.noteStaff));
+      return;
+    }
+    const cut = e.target.closest("[data-cut-staff]");
+    if (cut) {
+      showCut(Number(cut.dataset.cutStaff));
       return;
     }
     const cell = e.target.closest("td[data-staff]");
@@ -221,10 +227,11 @@ function setMessage(text, type = "") {
 // シフト表
 // ---------------------------------------------------------
 
-// "17:00" → "17"、"17:30" → "17:30"（マスの中は狭いので短くする）
 function renderGrid() {
   const { period, staff, rules, prefs, shifts } = state;
   const dates = Array.from({ length: daysInMonth(period) }, (_, i) => toDate(period, i + 1));
+  const closed = new Set(dates.filter((d) => isClosedDay(d, rules))); // 定休日
+  cutInfo = new Map();
 
   // 日ごとに、入っている人数を数える（全体・男性・女性・ベテラン）
   // ※ 判定のしくみ（rules.js の judgeDay）は「○と△」の形で受け取るので、△の側は0にしておく
@@ -236,10 +243,17 @@ function renderGrid() {
   for (const person of staff) {
     let days = 0;
     let cells = "";
+    const okDays = []; // ○を出した日（定休日をのぞく）
+    const cutDays = []; // ○なのに入れていない日（＝削った日）
     for (const date of dates) {
       const pref = prefs.get(keyOf(person.id, date));
       const shift = shifts.get(keyOf(person.id, date));
+      if (pref?.status === "ok" && !closed.has(date)) {
+        okDays.push(date);
+        if (!shift) cutDays.push(date);
+      }
       const cls = ["cell", pref ? `pref-${pref.status}` : "pref-none"];
+      if (closed.has(date)) cls.push("closed");
       let inner = pref ? `<span class="pref">${pref.status === "ok" ? "○" : "△"}</span>` : "";
       if (shift) {
         days++;
@@ -259,24 +273,35 @@ function renderGrid() {
     const noteBadge = note
       ? ` <button type="button" class="note-badge" data-note-staff="${person.id}" title="${escapeHtml(note)}">備考</button>`
       : "";
+    // 削った日数（○を出したのに入れていない日の数）。タップすると日付が出る
+    const cutText =
+      `○を出した ${okDays.length}日のうち、${cutDays.length}日 入れていない` +
+      (cutDays.length ? `\n${cutDays.map(formatDate).join("、")}` : "");
+    cutInfo.set(person.id, cutText);
+    const cutCell = state.subs.has(person.id)
+      ? `<td class="cut-count${cutDays.length ? " has-cut" : ""}" data-cut-staff="${person.id}" title="${escapeHtml(
+          cutText
+        )}">${cutDays.length}</td>`
+      : "<td class='cut-count'>-</td>";
     body += `<tr><td class="name">${escapeHtml(person.name)}${noteBadge}</td><td>${GENDER_SHORT[person.gender] ?? "-"}</td><td class="${
       person.level === "veteran" ? "level-veteran" : ""
-    }">${LEVEL_SHORT[person.level] ?? "-"}</td><td>${days}</td>${cells}</tr>`;
+    }">${LEVEL_SHORT[person.level] ?? "-"}</td><td>${days}</td>${cutCell}${cells}</tr>`;
   }
   body += "</tbody>";
 
   const judged = Object.fromEntries(dates.map((d) => [d, judgeDay(d, count, rules)]));
 
   // 見出し
-  let head = "<thead><tr><th class='name'>名前</th><th>性別</th><th>レベル</th><th>日数</th>";
+  let head =
+    "<thead><tr><th class='name'>名前</th><th>性別</th><th>レベル</th><th>日数</th><th title='○を出したのに入れていない日の数'>削った</th>";
   for (const date of dates) head += dayHeaderCell(date, judged[date]);
   head += "</tr></thead>";
 
   // 下の合計（行ごとに、その項目の判定で色をつける → 何が原因か分かる）
   const footRow = (label, values, cls, ruleKey) => {
-    let row = `<tr class="${cls}"><td class='name'>${label}</td><td colspan='3'></td>`;
+    let row = `<tr class="${cls}"><td class='name'>${label}</td><td colspan='4'></td>`;
     for (const date of dates) {
-      const level = judged[date].checks[ruleKey] ?? "";
+      const level = judged[date].closed ? "closed" : judged[date].checks[ruleKey] ?? "";
       const target = judged[date].targets[ruleKey];
       const text = values[date] || (target != null ? "0" : "");
       row += `<td class="${level}">${text}${target != null ? `<span class="target">/${target}</span>` : ""}</td>`;
@@ -319,6 +344,16 @@ function renderIssues(dates, judged) {
     if (outside.length) {
       lines.push(
         `<li><span class="issue-date">${escapeHtml(person.name)}</span><span class="issue-chip ng">希望が出ていない日：${outside
+          .map(formatDate)
+          .join("、")}</span></li>`
+      );
+    }
+
+    // 定休日に入っている（あとから定休日にした日など）
+    const onClosed = dates.filter((d) => judged[d].closed && shifts.has(keyOf(person.id, d)));
+    if (onClosed.length) {
+      lines.push(
+        `<li><span class="issue-date">${escapeHtml(person.name)}</span><span class="issue-chip ng">定休日に入っている：${onClosed
           .map(formatDate)
           .join("、")}</span></li>`
       );
@@ -369,6 +404,14 @@ function weeksOf(dates) {
   return weeks;
 }
 
+// 削った日（○なのに入れていない日）を表示する（備考と同じ小さい画面を使う）
+function showCut(staffId) {
+  const person = state.staff.find((p) => p.id === staffId);
+  els.noteTitle.textContent = `${person.name} さんの削った日`;
+  els.noteBody.textContent = cutInfo.get(staffId) ?? "";
+  els.noteDialog.showModal();
+}
+
 // 備考の全文を表示する
 function showNote(staffId) {
   const person = state.staff.find((p) => p.id === staffId);
@@ -406,6 +449,11 @@ function openCell(staffId, date) {
   els.cellSave.textContent = shift ? "時間を変える" : "入れる";
   els.cellRemove.hidden = !shift;
   els.cellMessage.textContent = "";
+
+  // 定休日は入れられない（あとから定休日にした日に残っている分は「外す」だけできる）
+  const closedDay = isClosedDay(date, state.rules);
+  els.cellSave.hidden = closedDay;
+  if (closedDay) els.cellMessage.textContent = "この日は定休日です。";
   els.dialog.showModal();
 }
 

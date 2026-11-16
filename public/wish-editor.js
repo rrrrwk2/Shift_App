@@ -26,7 +26,7 @@ const wishEls = {
 };
 
 // 編集中の内容
-let wishTarget = null; // { person, period, sub, onSaved }
+let wishTarget = null; // { person, period, sub, onSaved, closedDates }
 let wishDays = new Map(); // "2026-12-03" → { status: "ok" | "maybe", start_time, end_time }
 
 // 週の日数の選択肢（最初に1回だけ作る）
@@ -49,8 +49,9 @@ wishEls.end.addEventListener("input", renderWishDayList);
 //   period : "2026-12"
 //   sub    : その人の今の希望（未提出なら null）
 //   onSaved: 保存・削除できたあとに呼ぶ（一覧を読み込み直すため）
-function openWishEditor(person, period, sub, onSaved) {
-  wishTarget = { person, period, sub, onSaved };
+//   closedDates: 定休日（Set）。カレンダーで選べなくする
+function openWishEditor(person, period, sub, onSaved, closedDates = new Set()) {
+  wishTarget = { person, period, sub, onSaved, closedDates };
   wishEls.title.textContent = `${person.name} さんの ${formatPeriod(period)} の希望`;
 
   // 今の状態と、代理入力であることの説明
@@ -68,8 +69,11 @@ function openWishEditor(person, period, sub, onSaved) {
   wishEls.min.value = sub?.min_days_per_week ?? "";
   wishEls.max.value = sub?.max_days_per_week ?? "";
   wishEls.note.value = sub?.note ?? "";
+  // 定休日に残っている希望は外す（定休日はあとから設定されることもあるため）
   wishDays = new Map(
-    (sub?.days ?? []).map((d) => [d.date, { status: d.status, start_time: d.start_time ?? "", end_time: d.end_time ?? "" }])
+    (sub?.days ?? [])
+      .filter((d) => !closedDates.has(d.date))
+      .map((d) => [d.date, { status: d.status, start_time: d.start_time ?? "", end_time: d.end_time ?? "" }])
   );
 
   wishEls.remove.hidden = !sub;
@@ -92,6 +96,13 @@ function renderWishCalendar() {
     const wd = weekdayOf(date);
     const status = wishDays.get(date)?.status;
     const dayCls = wd === 0 || isHoliday(date) ? " sun" : wd === 6 ? " sat" : "";
+    if (wishTarget.closedDates.has(date)) {
+      // 定休日は選べない
+      html += `<button type="button" class="day closed${dayCls}" disabled aria-label="${formatDate(date)} 定休日">
+        <span class="num">${day}</span><span class="mark">休</span>
+      </button>`;
+      continue;
+    }
     html += `<button type="button" class="day${dayCls}${status ? ` ${status}` : ""}" data-date="${date}">
       <span class="num">${day}</span><span class="mark">${status === "ok" ? "○" : status === "maybe" ? "△" : ""}</span>
     </button>`;

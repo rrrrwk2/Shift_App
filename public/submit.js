@@ -31,6 +31,7 @@ const els = {
   defaultStart: $("default-start"),
   defaultEnd: $("default-end"),
   calendar: $("calendar"),
+  closedHint: $("closed-hint"),
   dayListCard: $("day-list-card"),
   dayList: $("day-list"),
   minDays: $("min-days"),
@@ -491,6 +492,7 @@ function loadIntoForm(sub, { draft = false } = {}) {
   els.maxDays.value = sub?.max_days_per_week ?? "";
   els.note.value = sub?.note ?? "";
   for (const d of sub?.days ?? []) {
+    if (isClosedDate(d.date)) continue; // あとから定休日になった日の希望は外す
     days.set(d.date, {
       status: d.status,
       start_time: d.start_time ?? "",
@@ -507,9 +509,15 @@ function loadIntoForm(sub, { draft = false } = {}) {
   renderDayList();
 }
 
+// お店の定休日か（作成担当が設定した日。サーバーから closed_dates で受け取る）
+function isClosedDate(date) {
+  return (current?.closed_dates ?? []).includes(date);
+}
+
 function renderCalendar() {
   const period = els.periodSelect.value;
   els.calendar.innerHTML = "";
+  els.closedHint.hidden = (current?.closed_dates ?? []).length === 0;
 
   // 曜日の見出し
   WEEKDAYS.forEach((w, i) => {
@@ -532,6 +540,15 @@ function renderCalendar() {
 
     const cell = document.createElement("button");
     cell.type = "button";
+    if (isClosedDate(date)) {
+      // 定休日は選べない
+      cell.className = "day closed" + (wd === 0 ? " sun" : wd === 6 ? " sat" : "");
+      cell.disabled = true;
+      cell.innerHTML = `<span class="num">${day}</span><span class="mark">休</span>`;
+      cell.setAttribute("aria-label", `${formatDate(date)} 定休日`);
+      els.calendar.append(cell);
+      continue;
+    }
     cell.className =
       "day" + (wd === 0 ? " sun" : wd === 6 ? " sat" : "") + (status ? ` ${status}` : "");
     cell.innerHTML = `<span class="num">${day}</span><span class="mark">${
@@ -545,6 +562,7 @@ function renderCalendar() {
 
 // タップするたびに 空欄 → ○ → △ → 空欄 と切り替える
 function toggleDay(date) {
+  if (isClosedDate(date)) return;
   const now = days.get(date);
   if (!now) {
     days.set(date, { status: "ok", start_time: "", end_time: "" });

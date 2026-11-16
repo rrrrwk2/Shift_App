@@ -634,6 +634,35 @@ function loadRules(row) {
   };
 }
 
+async function readRules(env) {
+  return loadRules(await env.DB.prepare("SELECT value FROM settings WHERE key = 'daily_rules'").first());
+}
+
+// その月の定休日の一覧（["2026-12-30", "2026-12-31", ...]）
+//   その日だけの設定があればそれに従い、なければ毎週の定休日（closed_weekdays）
+//   ※ 画面側の isClosedDay（public/rules.js）と同じ決まり
+function closedDatesOf(period, rules) {
+  const [y, m] = period.split("-").map(Number);
+  const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  const result = [];
+  for (let d = 1; d <= last; d++) {
+    const date = `${period}-${String(d).padStart(2, "0")}`;
+    const special = rules.date_overrides?.[date];
+    const weekday = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+    if (special ? special.closed : rules.closed_weekdays.includes(weekday)) result.push(date);
+  }
+  return result;
+}
+
+// 希望に定休日が入っていたら、その説明を返す（なければ null）
+async function closedDayProblem(env, body) {
+  const closed = new Set(closedDatesOf(body.period, await readRules(env)));
+  const bad = body.days.find((d) => closed.has(d.date));
+  if (!bad) return null;
+  const [, m, d] = bad.date.split("-").map(Number);
+  return `${m}/${d} は定休日なので選べません。画面を読み込み直してください`;
+}
+
 // 並び順を保存する（ids に上から順番に並べたスタッフのidが入ってくる）
 async function saveStaffOrder(env, body) {
   const ids = body?.ids;
@@ -672,7 +701,7 @@ async function getSubmission(env, url, me) {
   const period = url.searchParams.get("period") ?? "";
   if (!isPeriod(period)) return json({ error: "月の指定が正しくありません" }, 400);
 
-  const [subRes, reqRes] = await env.DB.batch([
+  const [subRes, reqRes, rulesRes] = await env.DB.batch([
     env.DB.prepare("SELECT * FROM submissions WHERE staff_id = ? AND period = ?").bind(
       me.id,
       period
@@ -681,6 +710,7 @@ async function getSubmission(env, url, me) {
       `SELECT id, message, status, created_at FROM change_requests
         WHERE staff_id = ? AND period = ? ORDER BY id DESC`
     ).bind(me.id, period),
+    env.DB.prepare("SELECT value FROM settings WHERE key = 'daily_rules'"),
   ]);
 
   let submission = subRes.results[0] ?? null;
@@ -698,6 +728,8 @@ async function getSubmission(env, url, me) {
     change_requests: reqRes.results,
     period_info: periodInfo(period),
     can_edit: !isClosed(period),
+    // 定休日の日付だけを渡す（人数などのルールはスタッフには見せない）
+    closed_dates: closedDatesOf(period, loadRules(rulesRes.results[0])),
   });
 }
 
@@ -710,7 +742,7 @@ async function saveSubmission(env, me, body, lineUser) {
   if (body && typeof body === "object") body.staff_id = me.id;
 
   // ---- 1. 送られてきた内容をチェックする ----
-  const problem = validateSubmission(body);
+  const problem = validateSubmission(body) ?? (await closedDayProblem(env, body));
   if (problem) return json({ error: problem }, 400);
 
   // 締切を過ぎていたら受け付けない
@@ -803,7 +835,7 @@ async function writeSubmission(env, staffId, body, { draft, enteredBy }) {
 //   ・締切を過ぎていても保存できる
 //   ・だれが入力したか（entered_by）を残す
 async function saveSubmissionByAdmin(env, admin, body) {
-  const problem = validateSubmission(body);
+  const problem = validateSubmission(body) ?? (await closedDayProblem(env, body));
   if (problem) return json({ error: problem }, 400);
   const staff = await env.DB.prepare("SELECT id FROM staff WHERE id = ? AND active = 1")
     .bind(body.staff_id)
@@ -992,6 +1024,8 @@ async function generateDraft(env, admin, body) {
     return json({ error: "すでに下書きがあります", code: "draft_exists", count: existing.n }, 409);
   }
 
+  // 定休日は下書きに入れない（json_each で、JSONの配列を表のように使える）
+  const closed = JSON.stringify(closedDatesOf(period, await readRules(env)));
   await env.DB.batch([
     env.DB.prepare("DELETE FROM assignments WHERE period = ?").bind(period),
     // ○の日を、その日の時間（なければその人の基本の時間）で入れる
@@ -1003,8 +1037,9 @@ async function generateDraft(env, admin, body) {
          FROM availability a
          JOIN submissions s ON s.id = a.submission_id
          JOIN staff st ON st.id = s.staff_id
-        WHERE s.period = ? AND s.submitted_at IS NOT NULL AND a.status = 'ok' AND st.active = 1`
-    ).bind(period),
+        WHERE s.period = ? AND s.submitted_at IS NOT NULL AND a.status = 'ok' AND st.active = 1
+          AND a.date NOT IN (SELECT value FROM json_each(?))`
+    ).bind(period, closed),
     touchSchedule(env, period, admin),
   ]);
   const { n } = await env.DB.prepare("SELECT COUNT(*) AS n FROM assignments WHERE period = ?")
@@ -1027,6 +1062,9 @@ async function assignShift(env, admin, body) {
     .bind(staffId)
     .first();
   if (!staff) return json({ error: "そのスタッフは登録されていません" }, 400);
+  if (closedDatesOf(period, await readRules(env)).includes(date)) {
+    return json({ error: "この日は定休日なので入れられません" }, 400);
+  }
 
   await env.DB.batch([
     env.DB.prepare(
