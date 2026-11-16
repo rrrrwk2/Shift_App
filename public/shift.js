@@ -316,6 +316,7 @@ function renderGrid() {
   foot += "</tfoot>";
 
   els.grid.innerHTML = head + body + foot;
+  pinLeftColumns();
   renderIssues(dates, judged);
 }
 
@@ -403,6 +404,48 @@ function weeksOf(dates) {
   for (const w of weeks) w.full = w.days.length === 7;
   return weeks;
 }
+
+// ---------------------------------------------------------
+// 左の列（名前・性別・レベル・日数・削った）を、横にスクロールしても見えるように固定する
+//   列の幅は中身（名前の長さなど）で変わるので、表を作ったあとに幅を測って、
+//   それぞれの列の「左からの位置（left）」を決める
+//   スマホなど幅が狭い画面では、日付が見えなくなるので名前だけ固定する
+// ---------------------------------------------------------
+const PINNED_COLUMNS = 5;
+const wideScreen = window.matchMedia("(min-width: 700px)");
+
+function pinLeftColumns() {
+  const table = els.grid;
+  if (!table.tHead) return;
+  // いったん全部外す（画面の幅が変わったときに付け直すため）
+  for (const cell of table.querySelectorAll(".pinned")) {
+    cell.classList.remove("pinned", "pinned-last");
+    cell.style.left = "";
+  }
+  const count = wideScreen.matches ? PINNED_COLUMNS : 1;
+  // 1列目の左端からの距離
+  const heads = [...table.tHead.rows[0].cells].slice(0, count);
+  const origin = heads[0].getBoundingClientRect().left;
+  const lefts = heads.map((th) => th.getBoundingClientRect().left - origin);
+  for (const row of table.rows) {
+    let col = 0; // 何列目か（2列分の幅のマスもあるので数えながら進む）
+    let last = null;
+    for (const cell of row.cells) {
+      if (col >= count) break;
+      cell.classList.add("pinned");
+      cell.style.left = `${lefts[col]}px`;
+      last = cell;
+      col += cell.colSpan;
+    }
+    last?.classList.add("pinned-last"); // 固定した列の右端に線を引く
+  }
+}
+
+wideScreen.addEventListener("change", pinLeftColumns);
+window.addEventListener("resize", () => {
+  clearTimeout(pinLeftColumns.timer);
+  pinLeftColumns.timer = setTimeout(pinLeftColumns, 200);
+});
 
 // 削った日（○なのに入れていない日）を表示する（備考と同じ小さい画面を使う）
 function showCut(staffId) {

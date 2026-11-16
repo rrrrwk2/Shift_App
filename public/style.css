@@ -443,7 +443,9 @@ button:disabled {
 }
 
 table.grid {
-  border-collapse: collapse;
+  /* separate（線をマスごとに持つ）にしておくと、横スクロールで固定した列の線が消えない */
+  border-collapse: separate;
+  border-spacing: 0;
   font-size: 0.8rem;
   min-width: 100%;
 }
@@ -455,6 +457,8 @@ table.grid td {
   padding: 4px 6px;
   text-align: center;
   white-space: nowrap;
+  /* 行の高さを小数にしない（小数だと、固定した列の線がところどころ消える） */
+  line-height: 18px;
 }
 
 table.grid th.name,
@@ -1322,4 +1326,15 @@ table.grid td.cut-count.has-cut {
   color: var(--maybe);
   font-weight: 700;
   text-decoration: underline dotted;
+}
+
+/* シフト作成画面：横にスクロールしても見える左の列（場所は shift.js の pinLeftColumns で決める） */
+table.grid .pinned {
+  position: sticky;
+  z-index: 2;
+  background: var(--card);
+}
+
+table.grid .pinned-last {
+  box-shadow: inset -2px 0 0 var(--line);
 }
