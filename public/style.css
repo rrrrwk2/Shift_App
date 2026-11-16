@@ -949,6 +949,14 @@ table.shift-grid .shift-time {
   margin-top: 6px;
 }
 
+/* 入れていない日（削った日・△の日）の希望の時間：グレーで小さく */
+table.shift-grid .wish-time {
+  display: block;
+  font-size: 0.7rem;
+  margin-top: 6px;
+  color: var(--muted);
+}
+
 .legend-box.assigned {
   background: var(--accent);
 }

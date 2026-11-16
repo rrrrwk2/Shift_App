@@ -265,6 +265,11 @@ function renderGrid() {
         if (person.gender === "female") c.female[date]++;
         if (person.level === "veteran") c.veteran[date]++;
         inner += `<span class="shift-time">${escapeHtml(shortRange(shift.start_time, shift.end_time) || "?-L")}</span>`;
+      } else if (pref && !closed.has(date)) {
+        // 入れていない日（削った日・△の日）は、希望の時間をグレーで出しておく
+        const sub = state.subs.get(person.id);
+        const time = shortRange(pref.start_time || sub?.default_start, pref.end_time || sub?.default_end);
+        if (time) inner += `<span class="wish-time">${escapeHtml(time)}</span>`;
       }
       cells += `<td class="${cls.join(" ")}" data-staff="${person.id}" data-date="${date}">${inner}</td>`;
     }
@@ -274,9 +279,15 @@ function renderGrid() {
       ? ` <button type="button" class="note-badge" data-note-staff="${person.id}" title="${escapeHtml(note)}">備考</button>`
       : "";
     // 削った日数（○を出したのに入れていない日の数）。タップすると日付が出る
+    // 1日ずつ「12/5(土) 17-L」のように、希望の時間もつけて並べる
+    const sub = state.subs.get(person.id);
+    const cutLines = cutDays.map((d) => {
+      const p = prefs.get(keyOf(person.id, d));
+      return `${formatDate(d)}  ${shortRange(p.start_time || sub?.default_start, p.end_time || sub?.default_end)}`.trim();
+    });
     const cutText =
       `○を出した ${okDays.length}日のうち、${cutDays.length}日 入れていない` +
-      (cutDays.length ? `\n${cutDays.map(formatDate).join("、")}` : "");
+      (cutLines.length ? `\n\n${cutLines.join("\n")}` : "");
     cutInfo.set(person.id, cutText);
     const cutCell = state.subs.has(person.id)
       ? `<td class="cut-count${cutDays.length ? " has-cut" : ""}" data-cut-staff="${person.id}" title="${escapeHtml(
