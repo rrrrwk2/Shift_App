@@ -134,6 +134,17 @@ function formatRange(start, end) {
   return `${start || ""}〜${end || ""}`;
 }
 
+// 表のマスで短く見せる時刻："17:00" → "17"、"17:30" → "17:30"
+function shortTime(t) {
+  return t ? t.replace(/:00$/, "") : "";
+}
+
+// 表のマス用の短い時間："17:00"〜"22:00" → "17-22"、終わりが空なら "17-L"（L＝ラストまで）
+function shortRange(start, end) {
+  if (!start && !end) return "";
+  return `${shortTime(start) || "?"}-${end ? shortTime(end) : "L"}`;
+}
+
 // 文字をHTMLに入れても安全な形にする
 function escapeHtml(s) {
   return String(s ?? "").replace(

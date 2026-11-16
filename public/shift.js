@@ -220,8 +220,6 @@ function setMessage(text, type = "") {
 // ---------------------------------------------------------
 
 // "17:00" → "17"、"17:30" → "17:30"（マスの中は狭いので短くする）
-const shortTime = (t) => (t ? t.replace(/:00$/, "") : "");
-
 function renderGrid() {
   const { period, staff, rules, prefs, shifts } = state;
   const dates = Array.from({ length: daysInMonth(period) }, (_, i) => toDate(period, i + 1));
@@ -250,8 +248,7 @@ function renderGrid() {
         if (person.gender === "male") c.male[date]++;
         if (person.gender === "female") c.female[date]++;
         if (person.level === "veteran") c.veteran[date]++;
-        const end = shift.end_time ? shortTime(shift.end_time) : "L";
-        inner += `<span class="shift-time">${escapeHtml(shortTime(shift.start_time) || "?")}-${escapeHtml(end)}</span>`;
+        inner += `<span class="shift-time">${escapeHtml(shortRange(shift.start_time, shift.end_time) || "?-L")}</span>`;
       }
       cells += `<td class="${cls.join(" ")}" data-staff="${person.id}" data-date="${date}">${inner}</td>`;
     }

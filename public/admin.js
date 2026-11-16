@@ -177,7 +177,8 @@ function renderGrid(period, staff, submissions, periodInfo, rules) {
       if (person.gender === "female") c.female[date]++;
       if (person.level === "veteran") c.veteran[date]++;
       const mark = d.status === "ok" ? "○" : "△";
-      const time = formatRange(d.start_time, d.end_time);
+      // その日だけの時間がなければ、その人の基本の時間を出す（全員が同じ形で並ぶように）
+      const time = shortRange(d.start_time || sub.default_start, d.end_time || sub.default_end);
       body += `<td class="${d.status}">${mark}${
         time ? `<span class="time">${escapeHtml(time)}</span>` : ""
       }</td>`;
