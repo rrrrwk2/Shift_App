@@ -74,7 +74,9 @@ async function init() {
 
   // LINEでログインして、管理者だと確認できたら読み込む（admin-auth.js）
   await adminLogin(async () => {
-    fillPeriodSelect(els.periodSelect, await api("/api/periods"));
+    // 作成担当の画面は、開いた日の「今月」を最初に選んでおく
+    const periods = await api("/api/periods");
+    fillPeriodSelect(els.periodSelect, { ...periods, initial: periods.current ?? periods.initial });
     await load();
   });
 }

@@ -490,6 +490,8 @@ function periodInfo(period) {
 }
 
 // 選べる月（今月・来月・再来月）と、最初に選んでおく月を返す
+//   initial … スタッフの提出画面用：まだ締切前の一番近い月
+//   current … 作成担当の画面用：今月（日本時間）
 function listPeriods() {
   const jstNow = new Date(Date.now() + 9 * 60 * 60 * 1000);
   const periods = [];
@@ -498,9 +500,8 @@ function listPeriods() {
     const period = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
     periods.push(periodInfo(period));
   }
-  // 最初に選んでおくのは「まだ締切前の一番近い月」
   const initial = (periods.find((p) => p.open) ?? periods[periods.length - 1]).period;
-  return json({ periods, initial });
+  return json({ periods, initial, current: periods[0].period });
 }
 
 // =========================================================
