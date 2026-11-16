@@ -71,9 +71,9 @@ async function init() {
 
   // LINEでログインして、管理者だと確認できたら読み込む（admin-auth.js）
   await adminLogin(async () => {
-    // 作成担当の画面は、開いた日の「今月」を最初に選んでおく
+    // 作成担当の画面は「来月」を最初に選んでおく（11月に開いたら12月）
     const periods = await api("/api/periods");
-    fillPeriodSelect(els.periodSelect, { ...periods, initial: periods.current ?? periods.initial });
+    fillPeriodSelect(els.periodSelect, { ...periods, initial: periods.next ?? periods.initial });
     await load();
     watchOtherEdits();
   });
@@ -269,14 +269,7 @@ function renderGrid() {
 
   // 見出し
   let head = "<thead><tr><th class='name'>名前</th><th>性別</th><th>レベル</th><th>日数</th>";
-  for (const date of dates) {
-    const wd = weekdayOf(date);
-    const holiday = isHoliday(date);
-    const dayCls = wd === 0 || holiday ? "sun" : wd === 6 ? "sat" : "";
-    head += `<th class="${dayCls} ${judged[date].level}" title="${escapeHtml(
-      judged[date].items.map((i) => i.text).join("、")
-    )}">${Number(date.slice(-2))}<br>${holiday ? "祝" : WEEKDAYS[wd]}</th>`;
-  }
+  for (const date of dates) head += dayHeaderCell(date, judged[date]);
   head += "</tr></thead>";
 
   // 下の合計（行ごとに、その項目の判定で色をつける → 何が原因か分かる）

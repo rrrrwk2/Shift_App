@@ -75,7 +75,15 @@
           </div>
           <p class="hint" style="margin: 12px 0 6px">チェックしない曜日（定休日などの設定）</p>
           <div id="rule-closed" class="weekday-checks"></div>
-          <button id="rules-save" type="button" style="margin-top: 12px">保存</button>
+
+          <!-- 特定の日だけ人数を変える（クリスマス・年末など） -->
+          <p class="hint" style="margin: 14px 0 6px">
+            <strong>特定の日だけの設定</strong>：クリスマスや年末など、その日だけ人数を変える。空欄の項目はいつもどおり。
+          </p>
+          <ul id="rule-dates" class="date-rules"></ul>
+          <button id="rule-date-add" type="button">日付を追加</button>
+
+          <button id="rules-save" type="button" class="primary" style="margin-top: 12px">保存</button>
           <div id="rules-message" class="message"></div>
         </details>
 
@@ -86,9 +94,10 @@
           ○△の下の時間は、その日だけの指定がなければその人の基本の時間（17-L は17時からラストまで）。<br />名前をタップすると、その人の希望を代わりに入力・修正できる（遅れて出した人など）。備考はタップで全文。
         </p>
         <p class="hint legend">
-          <span class="legend-box good"></span>足りている
-          <span class="legend-box warn"></span>あと1人（または△の人も入れば足りる）
-          <span class="legend-box ng"></span>2人以上足りない
+          <span class="legend-box good"></span>条件どおり
+          <span class="legend-box warn"></span>1人足りない・多い（または△の人も入れば足りる）
+          <span class="legend-box ng"></span>2人以上足りない・多い
+          ／ 日付の＊はその日だけの設定あり
         </p>
 
         <!-- ルールを満たさない日の一覧 -->

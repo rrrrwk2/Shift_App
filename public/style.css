@@ -1223,3 +1223,55 @@ table.view-grid tr.me-row td.on {
 .wish-dialog .dialog-focus:focus {
   outline: none;
 }
+
+/* ---------- 特定の日だけの設定（定員人数の設定の中） ---------- */
+.date-rules {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 8px;
+  display: grid;
+  gap: 8px;
+}
+
+.date-rules li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  margin: 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.date-rules label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.date-rules input[type="date"],
+.date-rules input[type="number"] {
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+}
+
+.date-rules input[type="number"] {
+  width: 3.5em;
+}
+
+.date-rules .date-rule-remove {
+  margin-left: auto;
+  padding: 4px 12px;
+  font-size: 0.8rem;
+}
+
+/* 表の日付についている「＊」（その日だけの設定あり） */
+.special-mark {
+  font-size: 0.75em;
+  color: var(--accent);
+}

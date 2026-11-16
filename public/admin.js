@@ -30,6 +30,8 @@ const els = {
   ruleMale: $("rule-male"),
   ruleFemale: $("rule-female"),
   ruleClosed: $("rule-closed"),
+  ruleDates: $("rule-dates"),
+  ruleDateAdd: $("rule-date-add"),
   rulesSave: $("rules-save"),
   rulesMessage: $("rules-message"),
   issuesCard: $("issues-card"),
@@ -59,6 +61,13 @@ async function init() {
   els.staffAdd.addEventListener("click", onAddStaff);
   els.remindButton.addEventListener("click", onRemindNow);
   els.rulesSave.addEventListener("click", onSaveRules);
+  els.ruleDateAdd.addEventListener("click", () => {
+    els.ruleDates.append(dateRuleRow("", {}));
+    els.ruleDates.lastElementChild.querySelector("input[type=date]").focus();
+  });
+  els.ruleDates.addEventListener("click", (e) => {
+    if (e.target.closest(".date-rule-remove")) e.target.closest("li").remove();
+  });
   els.grid.addEventListener("click", onGridClick);
   els.noteClose.addEventListener("click", () => els.noteDialog.close());
   els.adminInvite.addEventListener("click", onInviteAdmin);
@@ -74,9 +83,9 @@ async function init() {
 
   // LINEでログインして、管理者だと確認できたら読み込む（admin-auth.js）
   await adminLogin(async () => {
-    // 作成担当の画面は、開いた日の「今月」を最初に選んでおく
+    // 作成担当の画面は「来月」を最初に選んでおく（11月に開いたら12月）
     const periods = await api("/api/periods");
-    fillPeriodSelect(els.periodSelect, { ...periods, initial: periods.current ?? periods.initial });
+    fillPeriodSelect(els.periodSelect, { ...periods, initial: periods.next ?? periods.initial });
     await load();
   });
 }
@@ -199,21 +208,12 @@ function renderGrid(period, staff, submissions, periodInfo, rules) {
   body += "</tbody>";
 
   // ---- ルールの判定（日ごと） ----
-  // 希望の段階では、○の人が定員より多いのは問題にしない（選べる人が多いだけ）
-  const judged = Object.fromEntries(dates.map((date) => [date, judgeDay(date, count, rules, { overIsOk: true })]));
+  const judged = Object.fromEntries(dates.map((date) => [date, judgeDay(date, count, rules)]));
 
   // ---- 見出し（調整が必要な日は色をつける。祝日は「祝」と表示） ----
   let head =
     "<thead><tr><th class='name'>名前</th><th>性別</th><th>レベル</th><th>週の希望</th><th>基本の時間</th>";
-  for (const date of dates) {
-    const wd = weekdayOf(date);
-    const holiday = isHoliday(date);
-    const dayCls = wd === 0 || holiday ? "sun" : wd === 6 ? "sat" : "";
-    const title = judged[date].items.map((i) => i.text).join("、");
-    head += `<th class="${dayCls} ${judged[date].level}" title="${escapeHtml(title)}">${Number(
-      date.slice(-2)
-    )}<br>${holiday ? "祝" : WEEKDAYS[wd]}</th>`;
-  }
+  for (const date of dates) head += dayHeaderCell(date, judged[date]);
   head += "<th>備考</th><th>更新</th></tr></thead>";
 
   // ---- 合計（日ごとの人数） ----
@@ -298,6 +298,53 @@ function renderRulesForm(rules) {
         rules.closed_weekdays.includes(i) ? "checked" : ""
       } />${w}</label>`
   ).join("");
+
+  // 特定の日だけの設定（日付の順に並べる）
+  els.ruleDates.innerHTML = "";
+  const overrides = rules.date_overrides ?? {};
+  for (const date of Object.keys(overrides).sort()) els.ruleDates.append(dateRuleRow(date, overrides[date]));
+}
+
+// 特定の日の設定の1行（日付・定員・ベテラン・男性・女性・休み・削除）
+const DATE_RULE_FIELDS = [
+  ["capacity", "定員", "人"],
+  ["min_veteran", "ベテラン", "人以上"],
+  ["min_male", "男性", "人以上"],
+  ["min_female", "女性", "人以上"],
+];
+
+function dateRuleRow(date, rule) {
+  const li = document.createElement("li");
+  li.innerHTML = `
+    <input type="date" aria-label="日付" />
+    ${DATE_RULE_FIELDS.map(
+      ([field, label, unit]) =>
+        `<label>${label}<input type="number" min="0" max="99" inputmode="numeric" data-field="${field}" />${unit}</label>`
+    ).join("")}
+    <label class="check-row"><input type="checkbox" data-field="closed" />休み（チェックしない）</label>
+    <button type="button" class="date-rule-remove danger-outline">削除</button>`;
+  li.querySelector("input[type=date]").value = date;
+  for (const [field] of DATE_RULE_FIELDS) li.querySelector(`[data-field="${field}"]`).value = rule[field] ?? "";
+  li.querySelector('[data-field="closed"]').checked = !!rule.closed;
+  return li;
+}
+
+// 特定の日の設定を、保存する形（{ "2026-12-24": { capacity: 6, ... } }）にまとめる
+function readDateRules(num) {
+  const result = {};
+  for (const li of els.ruleDates.children) {
+    const date = li.querySelector("input[type=date]").value;
+    const rule = { closed: li.querySelector('[data-field="closed"]').checked };
+    for (const [field] of DATE_RULE_FIELDS) rule[field] = num(li.querySelector(`[data-field="${field}"]`));
+    const empty = !rule.closed && DATE_RULE_FIELDS.every(([field]) => rule[field] === null);
+    if (!date) {
+      if (empty) continue; // 何も入れていない行は無視する
+      throw new Error("「特定の日だけの設定」で日付が入っていない行があります");
+    }
+    if (result[date]) throw new Error(`「特定の日だけの設定」で ${formatDate(date)} が2つあります`);
+    if (!empty) result[date] = rule;
+  }
+  return result;
 }
 
 async function onSaveRules() {
@@ -305,12 +352,20 @@ async function onSaveRules() {
   const capacity = Object.fromEntries(
     [...els.ruleCapacity.querySelectorAll("input")].map((input) => [input.dataset.key, num(input)])
   );
+  let dateOverrides;
+  try {
+    dateOverrides = readDateRules(num);
+  } catch (err) {
+    setRulesMessage(err.message, "error");
+    return;
+  }
   const body = {
     capacity,
     min_veteran: num(els.ruleVeteran),
     min_male: num(els.ruleMale),
     min_female: num(els.ruleFemale),
     closed_weekdays: [...els.ruleClosed.querySelectorAll("input:checked")].map((b) => Number(b.value)),
+    date_overrides: dateOverrides,
   };
   els.rulesSave.disabled = true;
   try {

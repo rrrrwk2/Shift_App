@@ -491,7 +491,7 @@ function periodInfo(period) {
 
 // 選べる月（今月・来月・再来月）と、最初に選んでおく月を返す
 //   initial … スタッフの提出画面用：まだ締切前の一番近い月
-//   current … 作成担当の画面用：今月（日本時間）
+//   next    … 作成担当の画面用：来月（日本時間。11月に開いたら12月のシフトを作る）
 function listPeriods() {
   const jstNow = new Date(Date.now() + 9 * 60 * 60 * 1000);
   const periods = [];
@@ -501,7 +501,7 @@ function listPeriods() {
     periods.push(periodInfo(period));
   }
   const initial = (periods.find((p) => p.open) ?? periods[periods.length - 1]).period;
-  return json({ periods, initial, current: periods[0].period });
+  return json({ periods, initial, next: periods[1].period });
 }
 
 // =========================================================
@@ -560,7 +560,19 @@ const DEFAULT_RULES = {
   min_male: null,
   min_female: null,
   closed_weekdays: [], // チェックしない曜日（0=日曜 〜 6=土曜）。定休日など
+  // 特定の日だけの設定 { "2026-12-24": { capacity, min_veteran, min_male, min_female, closed } }
+  // null の項目はいつもの設定のまま。closed: true ならその日はチェックしない
+  date_overrides: {},
 };
+const DATE_RULE_FIELDS = ["capacity", "min_veteran", "min_male", "min_female"];
+const MAX_DATE_RULES = 400;
+
+// "2026-12-24" のような、実在する日付か
+function isValidDate(s) {
+  if (typeof s !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  const d = new Date(`${s}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
+}
 
 // 0〜99の整数か、空（null）かを確かめる
 function toCount(v) {
@@ -582,6 +594,26 @@ async function saveRules(env, body) {
     return json({ error: "曜日の指定が正しくありません" }, 400);
   }
   rules.closed_weekdays = [...new Set(closed)].sort();
+
+  // 特定の日だけの設定
+  const overrides = body?.date_overrides ?? {};
+  if (typeof overrides !== "object" || Array.isArray(overrides)) {
+    return json({ error: "特定の日の設定が正しくありません" }, 400);
+  }
+  const dates = Object.keys(overrides).sort();
+  if (dates.length > MAX_DATE_RULES) return json({ error: `特定の日の設定は${MAX_DATE_RULES}日までです` }, 400);
+  rules.date_overrides = {};
+  try {
+    for (const date of dates) {
+      if (!isValidDate(date)) throw new Error("特定の日の設定に、正しくない日付があります");
+      const rule = { closed: overrides[date]?.closed === true };
+      for (const field of DATE_RULE_FIELDS) rule[field] = toCount(overrides[date]?.[field]);
+      // 何も設定していない日は保存しない
+      if (rule.closed || DATE_RULE_FIELDS.some((f) => rule[f] !== null)) rules.date_overrides[date] = rule;
+    }
+  } catch (err) {
+    return json({ error: err.message }, 400);
+  }
 
   await env.DB.prepare(
     `INSERT INTO settings (key, value, updated_at) VALUES ('daily_rules', ?, datetime('now'))
