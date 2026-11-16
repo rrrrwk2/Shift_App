@@ -39,6 +39,10 @@ const els = {
   adminInvite: $("admin-invite"),
   adminMessage: $("admin-message"),
   codeDialog: $("code-dialog"),
+  noteDialog: $("note-dialog"),
+  noteTitle: $("note-title"),
+  noteBody: $("note-body"),
+  noteClose: $("note-close"),
   codeTitle: $("code-title"),
   codeValue: $("code-value"),
   codeMessage: $("code-message"),
@@ -55,6 +59,8 @@ async function init() {
   els.staffAdd.addEventListener("click", onAddStaff);
   els.remindButton.addEventListener("click", onRemindNow);
   els.rulesSave.addEventListener("click", onSaveRules);
+  els.grid.addEventListener("click", onGridClick);
+  els.noteClose.addEventListener("click", () => els.noteDialog.close());
   els.adminInvite.addEventListener("click", onInviteAdmin);
   els.codeCopy.addEventListener("click", copyCodeMessage);
   els.codeClose.addEventListener("click", () => els.codeDialog.close());
@@ -89,6 +95,7 @@ async function load() {
   try {
     const data = await adminApi(`/api/admin/submissions?period=${period}`);
     drafts = new Set(data.drafts ?? []);
+    gridData = { period, staff: data.staff, subs: new Map(data.submissions.map((s) => [s.staff_id, s])) };
     renderGrid(period, data.staff, data.submissions, data.period_info, data.rules);
     renderRulesForm(data.rules);
     renderRequests(data.change_requests);
@@ -101,8 +108,32 @@ async function load() {
   }
 }
 
+// 表の名前・備考をタップしたとき
+function onGridClick(e) {
+  if (!gridData) return;
+  const edit = e.target.closest("[data-edit-staff]");
+  if (edit) {
+    const person = gridData.staff.find((p) => p.id === Number(edit.dataset.editStaff));
+    openWishEditor(person, gridData.period, gridData.subs.get(person.id) ?? null, async (message) => {
+      await load();
+      els.summary.textContent = `${message} ・ ${els.summary.textContent}`;
+    });
+    return;
+  }
+  const note = e.target.closest("[data-note-staff]");
+  if (note) {
+    const id = Number(note.dataset.noteStaff);
+    const person = gridData.staff.find((p) => p.id === id);
+    els.noteTitle.textContent = `${person.name} さんの備考`;
+    els.noteBody.textContent = gridData.subs.get(id)?.note ?? "";
+    els.noteDialog.showModal();
+  }
+}
+
 // 下書きだけ保存して、まだ提出していない人（staff_id の集まり）
 let drafts = new Set();
+// 今表示している一覧のデータ（{ period, staff, subs: Map(staff_id → 希望) }）
+let gridData = null;
 
 function renderGrid(period, staff, submissions, periodInfo, rules) {
   const total = daysInMonth(period);
@@ -126,7 +157,10 @@ function renderGrid(period, staff, submissions, periodInfo, rules) {
     if (sub) submittedCount++;
     const dayMap = new Map((sub?.days ?? []).map((d) => [d.date, d]));
 
-    body += `<tr class="${sub ? "" : "unsubmitted"}"><td class="name">${escapeHtml(person.name)}</td>`;
+    // 名前をタップすると、希望を代わりに入力・修正できる（wish-editor.js）
+    body += `<tr class="${sub ? "" : "unsubmitted"}"><td class="name"><button type="button" class="name-link" data-edit-staff="${
+      person.id
+    }" title="希望を入力・修正">${escapeHtml(person.name)}</button></td>`;
     body += `<td>${GENDER_SHORT[person.gender] ?? "-"}</td>`;
     body += `<td class="${person.level === "veteran" ? "level-veteran" : ""}">${LEVEL_SHORT[person.level] ?? "-"}</td>`;
     body += `<td>${sub ? weeklyText(sub) : drafts.has(person.id) ? "下書き中" : "未提出"}</td>`;
@@ -148,8 +182,16 @@ function renderGrid(period, staff, submissions, periodInfo, rules) {
         time ? `<span class="time">${escapeHtml(time)}</span>` : ""
       }</td>`;
     }
-    body += `<td class="note">${escapeHtml(sub?.note ?? "")}</td>`;
-    body += `<td>${sub ? escapeHtml(formatUpdated(sub.updated_at)) : ""}</td></tr>`;
+    // 備考は長いと表がくずれるので1行に省略し、タップで全文を出す
+    body += sub?.note
+      ? `<td class="note" data-note-staff="${person.id}" title="${escapeHtml(sub.note)}">${escapeHtml(sub.note)}</td>`
+      : "<td class='note'></td>";
+    // 更新日時（管理者が代わりに入力したものは「代理」と付ける）
+    body += `<td>${sub ? escapeHtml(formatUpdated(sub.updated_at)) : ""}${
+      sub?.entered_by
+        ? `<span class="proxy-badge" title="代理入力：${escapeHtml(sub.entered_by)}">代理</span>`
+        : ""
+    }</td></tr>`;
   }
   body += "</tbody>";
 

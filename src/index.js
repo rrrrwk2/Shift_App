@@ -99,6 +99,12 @@ async function handleApi(request, env, url) {
     }
 
     if (path === "/api/admin/submissions" && method === "GET") return listSubmissions(env, url);
+    if (path === "/api/admin/submission" && method === "POST") {
+      return saveSubmissionByAdmin(env, admin, await readJson(request));
+    }
+    if (path === "/api/admin/submission/delete" && method === "POST") {
+      return deleteSubmissionByAdmin(env, await readJson(request));
+    }
     if (path === "/api/admin/staff" && method === "POST") {
       return addStaff(env, await readJson(request));
     }
@@ -695,49 +701,8 @@ async function saveSubmission(env, me, body, lineUser) {
   }
   const isUpdate = Boolean(existing?.submitted_at); // 提出済みの内容を直したか
 
-  // ---- 2. まとめて保存する ----
-  // batch() に渡した処理は「全部成功」か「全部やり直し」のどちらかになる（途中で止まらない）
-  const findId = "(SELECT id FROM submissions WHERE staff_id = ? AND period = ?)";
-  const statements = [
-    // 提出の本体：なければ追加、あれば上書き
-    //   提出したときは submitted_at に今の時刻を入れる。下書きなら空のまま
-    env.DB.prepare(
-      `INSERT INTO submissions
-         (staff_id, period, min_days_per_week, max_days_per_week, default_start, default_end, note,
-          updated_at, submitted_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), CASE WHEN ? THEN NULL ELSE datetime('now') END)
-       ON CONFLICT (staff_id, period) DO UPDATE SET
-         min_days_per_week = excluded.min_days_per_week,
-         max_days_per_week = excluded.max_days_per_week,
-         default_start     = excluded.default_start,
-         default_end       = excluded.default_end,
-         note              = excluded.note,
-         updated_at        = datetime('now'),
-         submitted_at      = excluded.submitted_at`
-    ).bind(
-      me.id,
-      body.period,
-      body.min_days_per_week ?? null,
-      body.max_days_per_week ?? null,
-      body.default_start || null,
-      body.default_end || null,
-      body.note || null,
-      isDraft ? 1 : 0
-    ),
-    // 前回の日ごとの希望をいったん消す
-    env.DB.prepare(`DELETE FROM availability WHERE submission_id = ${findId}`).bind(
-      me.id,
-      body.period
-    ),
-    // 今回の日ごとの希望を入れ直す
-    ...body.days.map((d) =>
-      env.DB.prepare(
-        `INSERT INTO availability (submission_id, date, status, start_time, end_time)
-         VALUES (${findId}, ?, ?, ?, ?)`
-      ).bind(me.id, body.period, d.date, d.status, d.start_time || null, d.end_time || null)
-    ),
-  ];
-  await env.DB.batch(statements);
+  // ---- 2. 保存する ----
+  await writeSubmission(env, me.id, body, { draft: isDraft, enteredBy: null });
 
   if (isDraft) return json({ ok: true, draft: true });
 
@@ -753,6 +718,83 @@ async function saveSubmission(env, me, body, lineUser) {
     }
   }
   return json({ ok: true, notified });
+}
+
+// 希望を保存する（本人の提出と、管理者の代理入力で共通）
+//   draft     : true なら下書き（提出したことにはしない）
+//   enteredBy : 管理者が代わりに入力したときは、その管理者の名前（本人なら null）
+async function writeSubmission(env, staffId, body, { draft, enteredBy }) {
+  // batch() に渡した処理は「全部成功」か「全部やり直し」のどちらかになる（途中で止まらない）
+  const findId = "(SELECT id FROM submissions WHERE staff_id = ? AND period = ?)";
+  await env.DB.batch([
+    // 提出の本体：なければ追加、あれば上書き
+    //   提出したときは submitted_at に今の時刻を入れる。下書きなら空のまま
+    env.DB.prepare(
+      `INSERT INTO submissions
+         (staff_id, period, min_days_per_week, max_days_per_week, default_start, default_end, note,
+          updated_at, submitted_at, entered_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), CASE WHEN ? THEN NULL ELSE datetime('now') END, ?)
+       ON CONFLICT (staff_id, period) DO UPDATE SET
+         min_days_per_week = excluded.min_days_per_week,
+         max_days_per_week = excluded.max_days_per_week,
+         default_start     = excluded.default_start,
+         default_end       = excluded.default_end,
+         note              = excluded.note,
+         updated_at        = datetime('now'),
+         submitted_at      = excluded.submitted_at,
+         entered_by        = excluded.entered_by`
+    ).bind(
+      staffId,
+      body.period,
+      body.min_days_per_week ?? null,
+      body.max_days_per_week ?? null,
+      body.default_start || null,
+      body.default_end || null,
+      body.note || null,
+      draft ? 1 : 0,
+      enteredBy
+    ),
+    // 前回の日ごとの希望をいったん消す
+    env.DB.prepare(`DELETE FROM availability WHERE submission_id = ${findId}`).bind(staffId, body.period),
+    // 今回の日ごとの希望を入れ直す
+    ...body.days.map((d) =>
+      env.DB.prepare(
+        `INSERT INTO availability (submission_id, date, status, start_time, end_time)
+         VALUES (${findId}, ?, ?, ?, ?)`
+      ).bind(staffId, body.period, d.date, d.status, d.start_time || null, d.end_time || null)
+    ),
+  ]);
+}
+
+// 管理者用：希望を代わりに入力・修正する（遅れて出した人の分など）
+//   ・締切を過ぎていても保存できる
+//   ・だれが入力したか（entered_by）を残す
+async function saveSubmissionByAdmin(env, admin, body) {
+  const problem = validateSubmission(body);
+  if (problem) return json({ error: problem }, 400);
+  const staff = await env.DB.prepare("SELECT id FROM staff WHERE id = ? AND active = 1")
+    .bind(body.staff_id)
+    .first();
+  if (!staff) return json({ error: "そのスタッフは登録されていません" }, 400);
+
+  await writeSubmission(env, body.staff_id, body, { draft: false, enteredBy: admin.name });
+  return json({ ok: true });
+}
+
+// 管理者用：希望を消して「未提出」に戻す（まちがえて入力したとき用）
+async function deleteSubmissionByAdmin(env, body) {
+  const staffId = body?.staff_id;
+  const period = body?.period;
+  if (!Number.isInteger(staffId) || !isPeriod(period)) {
+    return json({ error: "指定が正しくありません" }, 400);
+  }
+  await env.DB.batch([
+    env.DB.prepare(
+      "DELETE FROM availability WHERE submission_id IN (SELECT id FROM submissions WHERE staff_id = ? AND period = ?)"
+    ).bind(staffId, period),
+    env.DB.prepare("DELETE FROM submissions WHERE staff_id = ? AND period = ?").bind(staffId, period),
+  ]);
+  return json({ ok: true });
 }
 
 // 提出の控えの文章を作る

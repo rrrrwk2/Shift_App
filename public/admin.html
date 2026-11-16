@@ -83,7 +83,7 @@
           <table id="grid" class="grid"></table>
         </div>
         <p class="hint" style="margin-top: 8px">
-          時間記載なし→その人の基本の時間。
+          時間記載なし→その人の基本の時間。<br />名前をタップすると、その人の希望を代わりに入力・修正できる（遅れて出した人など）。備考はタップで全文。
         </p>
         <p class="hint legend">
           <span class="legend-box warn"></span>○だけでは足りない（△の人も入れば足りる）
@@ -130,6 +130,54 @@
       <div id="code-copy-result" class="message success"></div>
     </dialog>
 
+    <!-- 備考の全文を表示する小さい画面 -->
+    <dialog id="note-dialog" class="cell-dialog">
+      <h2 id="note-title"></h2>
+      <p id="note-body" class="note-full"></p>
+      <div class="dialog-buttons">
+        <button id="note-close" type="button">閉じる</button>
+      </div>
+    </dialog>
+
+    <!-- 希望を代わりに入力・修正する画面（遅れて出した人の分など） -->
+    <dialog id="wish-dialog" class="cell-dialog wish-dialog">
+      <!-- 開いたときに時間の入力欄ではなく見出しにフォーカスを置く（スマホで時刻の選択がいきなり出ないように） -->
+      <h2 id="wish-title" class="dialog-focus" tabindex="-1" autofocus></h2>
+      <p id="wish-info" class="hint"></p>
+
+      <h3 class="sub-title">基本の時間</h3>
+      <div class="row">
+        <input id="wish-start" type="time" aria-label="開始" />
+        <span class="sep">〜</span>
+        <input id="wish-end" type="time" aria-label="終了" />
+      </div>
+
+      <h3 class="sub-title">入れる日（タップで ○ → △ → 空欄）</h3>
+      <div id="wish-calendar" class="calendar"></div>
+
+      <div id="wish-day-card" hidden>
+        <h3 class="sub-title">日ごとの時間（変えたい日だけ）</h3>
+        <ul id="wish-day-list" class="day-list"></ul>
+      </div>
+
+      <h3 class="sub-title">週に入りたい日数</h3>
+      <div class="row">
+        <select id="wish-min" aria-label="週の最低日数"></select>
+        <span class="sep">〜</span>
+        <select id="wish-max" aria-label="週の最大日数"></select>
+      </div>
+
+      <h3 class="sub-title">備考</h3>
+      <textarea id="wish-note" maxlength="500"></textarea>
+
+      <div class="dialog-buttons">
+        <button id="wish-save" type="button" class="primary">この内容で保存</button>
+        <button id="wish-delete" type="button" class="danger-outline">希望を削除</button>
+        <button id="wish-cancel" type="button">やめる</button>
+      </div>
+      <div id="wish-message" class="message error"></div>
+    </dialog>
+
     <!-- ドラッグで並び替えるための部品（SortableJS 1.15.7, MITライセンス）。外部から読み込まず、このアプリに同梱している -->
     <script src="vendor/Sortable.min.js"></script>
     <!-- LINEでのログインに使うLINEの部品 -->
@@ -137,6 +185,7 @@
     <script src="common.js"></script>
     <script src="rules.js"></script>
     <script src="admin-auth.js"></script>
+    <script src="wish-editor.js"></script>
     <script src="admin.js"></script>
   </body>
 </html>

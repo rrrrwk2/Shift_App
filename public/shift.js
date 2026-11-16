@@ -29,6 +29,10 @@ const els = {
   cellRemove: $("cell-remove"),
   cellCancel: $("cell-cancel"),
   cellMessage: $("cell-message"),
+  noteDialog: $("note-dialog"),
+  noteTitle: $("note-title"),
+  noteBody: $("note-body"),
+  noteClose: $("note-close"),
 };
 
 // 画面の状態（load() で読み込む）
@@ -52,10 +56,16 @@ async function init() {
   els.publishButton.addEventListener("click", onPublish);
   // 表のマスをタップしたとき（マス1つ1つではなく、表全体で受け取る）
   els.grid.addEventListener("click", (e) => {
+    const noteButton = e.target.closest("[data-note-staff]");
+    if (noteButton) {
+      showNote(Number(noteButton.dataset.noteStaff));
+      return;
+    }
     const cell = e.target.closest("td[data-staff]");
     if (cell) openCell(Number(cell.dataset.staff), cell.dataset.date);
   });
   els.cellSave.addEventListener("click", onSaveCell);
+  els.noteClose.addEventListener("click", () => els.noteDialog.close());
   els.cellRemove.addEventListener("click", onRemoveCell);
   els.cellCancel.addEventListener("click", () => els.dialog.close());
 
@@ -245,7 +255,12 @@ function renderGrid() {
       }
       cells += `<td class="${cls.join(" ")}" data-staff="${person.id}" data-date="${date}">${inner}</td>`;
     }
-    body += `<tr><td class="name">${escapeHtml(person.name)}</td><td>${GENDER_SHORT[person.gender] ?? "-"}</td><td class="${
+    // 備考がある人は、名前の横に「備考」を出す（タップで全文）
+    const note = state.subs.get(person.id)?.note;
+    const noteBadge = note
+      ? ` <button type="button" class="note-badge" data-note-staff="${person.id}" title="${escapeHtml(note)}">備考</button>`
+      : "";
+    body += `<tr><td class="name">${escapeHtml(person.name)}${noteBadge}</td><td>${GENDER_SHORT[person.gender] ?? "-"}</td><td class="${
       person.level === "veteran" ? "level-veteran" : ""
     }">${LEVEL_SHORT[person.level] ?? "-"}</td><td>${days}</td>${cells}</tr>`;
   }
@@ -355,6 +370,14 @@ function weeksOf(dates) {
   }
   for (const w of weeks) w.full = w.days.length === 7;
   return weeks;
+}
+
+// 備考の全文を表示する
+function showNote(staffId) {
+  const person = state.staff.find((p) => p.id === staffId);
+  els.noteTitle.textContent = `${person.name} さんの備考`;
+  els.noteBody.textContent = state.subs.get(staffId)?.note ?? "";
+  els.noteDialog.showModal();
 }
 
 // ---------------------------------------------------------
