@@ -281,10 +281,10 @@ function renderGrid() {
   const footRow = (label, values, cls, ruleKey) => {
     let row = `<tr class="${cls}"><td class='name'>${label}</td><td colspan='3'></td>`;
     for (const date of dates) {
-      const item = judged[date].items.find((i) => i.key === ruleKey);
+      const level = judged[date].checks[ruleKey] ?? "";
       const target = judged[date].targets[ruleKey];
       const text = values[date] || (target != null ? "0" : "");
-      row += `<td class="${item?.level ?? ""}">${text}${target != null ? `<span class="target">/${target}</span>` : ""}</td>`;
+      row += `<td class="${level}">${text}${target != null ? `<span class="target">/${target}</span>` : ""}</td>`;
     }
     return row + "</tr>";
   };
@@ -310,7 +310,7 @@ function renderIssues(dates, judged) {
   const lines = [];
 
   for (const d of dates) {
-    if (!judged[d].level) continue;
+    if (!judged[d].items.length) continue;
     lines.push(
       `<li><span class="issue-date">${formatDate(d)}${isHoliday(d) ? "祝" : ""}</span>${judged[d].items
         .map((i) => `<span class="issue-chip ${i.level}">${escapeHtml(i.text)}</span>`)
@@ -329,21 +329,26 @@ function renderIssues(dates, judged) {
       );
     }
 
-    // 週の日数（月曜〜日曜で数える）
+    // 週の日数（月曜〜日曜で数える）。1日ずれているだけなら黄色、2日以上なら赤
     const sub = subs.get(person.id);
     if (!sub || (sub.min_days_per_week == null && sub.max_days_per_week == null)) continue;
+    const chip = (gap) => (gap === 1 ? "warn" : "ng");
     for (const week of weeksOf(dates)) {
       const n = week.days.filter((d) => shifts.has(keyOf(person.id, d))).length;
       const label = `${formatDate(week.days[0])}〜${formatDate(week.days[week.days.length - 1])}`;
       if (sub.max_days_per_week != null && n > sub.max_days_per_week) {
         lines.push(
-          `<li><span class="issue-date">${escapeHtml(person.name)}</span><span class="issue-chip over">${label} ${n}日（希望は週${sub.max_days_per_week}日まで）</span></li>`
+          `<li><span class="issue-date">${escapeHtml(person.name)}</span><span class="issue-chip ${chip(
+            n - sub.max_days_per_week
+          )}">${label} ${n}日（希望は週${sub.max_days_per_week}日まで）</span></li>`
         );
       }
       // 月の始まりと終わりの、途中で切れている週は「少なすぎ」は見ない
       if (week.full && sub.min_days_per_week != null && n < sub.min_days_per_week) {
         lines.push(
-          `<li><span class="issue-date">${escapeHtml(person.name)}</span><span class="issue-chip warn">${label} ${n}日（希望は週${sub.min_days_per_week}日以上）</span></li>`
+          `<li><span class="issue-date">${escapeHtml(person.name)}</span><span class="issue-chip ${chip(
+            sub.min_days_per_week - n
+          )}">${label} ${n}日（希望は週${sub.min_days_per_week}日以上）</span></li>`
         );
       }
     }

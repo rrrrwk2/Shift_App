@@ -197,7 +197,8 @@ function renderGrid(period, staff, submissions, periodInfo, rules) {
   body += "</tbody>";
 
   // ---- ルールの判定（日ごと） ----
-  const judged = Object.fromEntries(dates.map((date) => [date, judgeDay(date, count, rules)]));
+  // 希望の段階では、○の人が定員より多いのは問題にしない（選べる人が多いだけ）
+  const judged = Object.fromEntries(dates.map((date) => [date, judgeDay(date, count, rules, { overIsOk: true })]));
 
   // ---- 見出し（調整が必要な日は色をつける。祝日は「祝」と表示） ----
   let head =
@@ -219,10 +220,10 @@ function renderGrid(period, staff, submissions, periodInfo, rules) {
   const footRow = (label, values, cls = "", ruleKey = null) => {
     let row = `<tr class="${cls}"><td class='name'>${label}</td><td colspan='4'></td>`;
     for (const date of dates) {
-      const item = ruleKey ? judged[date].items.find((i) => i.key === ruleKey) : null;
+      const level = ruleKey ? judged[date].checks[ruleKey] ?? "" : "";
       const target = ruleKey ? judged[date].targets[ruleKey] : null;
       const text = values[date] || (target != null ? "0" : "");
-      row += `<td class="${item?.level ?? ""}">${text}${
+      row += `<td class="${level}">${text}${
         target != null ? `<span class="target">/${target}</span>` : ""
       }</td>`;
     }
@@ -255,7 +256,7 @@ function renderGrid(period, staff, submissions, periodInfo, rules) {
 
 // 調整が必要な日を、原因ごとに色のついたラベルで一覧にする（スマホでも分かるように）
 function renderIssues(dates, judged) {
-  const bad = dates.filter((d) => judged[d].level);
+  const bad = dates.filter((d) => judged[d].items.length);
   els.issuesCard.hidden = bad.length === 0;
   els.issuesTitle.textContent = `調整が必要な日（${bad.length}日）`;
   els.issuesList.innerHTML = bad

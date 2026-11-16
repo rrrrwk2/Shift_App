@@ -21,12 +21,16 @@ function weeklyText(sub) {
 // 毎日のルールの判定
 //
 // 1日ごとに、項目（定員・男性・女性・ベテラン）ごとの判定をまとめて返す
-//   items:   問題がある項目だけ { key, label, level, text } の形で入る
-//     level: "warn" … ○の人だけでは足りないが、△の人も入れば足りる
-//            "ng"   … △の人を入れても足りない
-//            "over" … 定員より多い
-//   level:   その日全体の判定（ng → warn → over の順に強い）
+//   checks:  項目ごとの判定 { capacity: "good", male: "warn", ... }（チェックしない項目は入らない）
+//            "good" … 条件どおり（うすい緑）
+//            "warn" … 惜しい：あと1人足りない・1人多い、または△の人も入れば足りる（黄色）
+//            "ng"   … 2人以上足りない・多い（赤）
+//   items:   問題がある項目（warn・ng）だけ { key, label, level, text } の形で入る
+//   level:   その日全体の判定（いちばん悪い項目。ng → warn → good）
 //   targets: 項目ごとの目標人数（表の下に「3/5」のように出すため）
+//
+// options.overIsOk … 定員より多くても問題にしない
+//   （希望の一覧では、○の人が定員より多いのは「選べる人が多い」だけなので条件どおり扱い）
 // ---------------------------------------------------------
 const MIN_ITEMS = [
   { key: "male", rule: "min_male", label: "男性" },
@@ -41,32 +45,36 @@ function capacityOf(date, rules) {
   return cap === undefined ? null : cap;
 }
 
-function judgeDay(date, count, rules) {
-  const result = { level: "", items: [], targets: {} };
+function judgeDay(date, count, rules, options = {}) {
+  const result = { level: "", items: [], targets: {}, checks: {} };
   if (rules.closed_weekdays.includes(weekdayOf(date))) return result; // チェックしない曜日
 
-  // 足りないかどうかを調べて、足りなければ items に入れる
+  // 項目の判定を記録する（問題があるものは items にも入れる）
+  const add = (key, label, level, text = "") => {
+    result.checks[key] = level;
+    if (level !== "good") result.items.push({ key, label, level, text });
+  };
+
+  // 足りているかを調べる
+  //   足りている → good、あと1人 or △の人も入れば足りる → warn、それ以外 → ng
   const checkMin = (key, label, counter, need) => {
     result.targets[key] = need;
     const ok = count.ok[counter][date];
-    const withMaybe = ok + count.maybe[counter][date];
-    if (ok >= need) return;
-    const level = withMaybe >= need ? "warn" : "ng";
-    result.items.push({
-      key,
-      label,
-      level,
-      text: `${label} ${ok}/${need}人${level === "warn" ? "（△を入れれば足りる）" : ""}`,
-    });
+    if (ok >= need) return add(key, label, "good");
+    const short = need - ok;
+    const coveredByMaybe = ok + count.maybe[counter][date] >= need;
+    const level = short === 1 || coveredByMaybe ? "warn" : "ng";
+    add(key, label, level, `${label} ${ok}/${need}人（${coveredByMaybe ? "△を入れれば足りる" : `あと${short}人`}）`);
   };
 
-  // 定員：少なすぎ（warn / ng）と多すぎ（over）
+  // 定員：少なすぎと多すぎ（1人多いだけなら warn、2人以上多いなら ng）
   const cap = capacityOf(date, rules);
   if (cap !== null) {
     const ok = count.ok.all[date];
-    if (ok > cap) {
+    if (ok > cap && !options.overIsOk) {
       result.targets.capacity = cap;
-      result.items.push({ key: "capacity", label: "定員", level: "over", text: `定員 ${ok}/${cap}人（${ok - cap}人多い）` });
+      const over = ok - cap;
+      add("capacity", "定員", over === 1 ? "warn" : "ng", `定員 ${ok}/${cap}人（${over}人多い）`);
     } else {
       checkMin("capacity", "定員", "all", cap);
     }
@@ -79,7 +87,7 @@ function judgeDay(date, count, rules) {
     checkMin(item.key, item.label, item.key, need);
   }
 
-  const levels = result.items.map((i) => i.level);
-  result.level = levels.includes("ng") ? "ng" : levels.includes("warn") ? "warn" : levels.includes("over") ? "over" : "";
+  const levels = Object.values(result.checks);
+  result.level = levels.includes("ng") ? "ng" : levels.includes("warn") ? "warn" : levels.length ? "good" : "";
   return result;
 }

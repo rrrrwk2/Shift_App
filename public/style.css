@@ -624,17 +624,24 @@ table.grid tfoot tr.sub-count td {
   font-size: 0.8rem;
 }
 
-/* ---------- 毎日のルール（足りない日の色分け） ---------- */
+/* ---------- 毎日のルール（日付と人数の色分け） ---------- */
 :root {
-  --warn-bg: #fff1c2; /* ○だけでは足りない日 */
-  --ng-bg: #fbd5d0; /* △を入れても足りない日 */
+  --good-bg: #e0f2e5; /* 条件どおり */
+  --warn-bg: #fff1c2; /* 惜しい（あと1人など） */
+  --ng-bg: #fbd5d0; /* 2人以上足りない・多い */
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
+    --good-bg: #1c3a27;
     --warn-bg: #4a3d14;
     --ng-bg: #5a2420;
   }
+}
+
+table.grid th.good,
+table.grid tfoot td.good {
+  background: var(--good-bg);
 }
 
 table.grid th.warn,
@@ -665,6 +672,10 @@ table.grid td.level-veteran {
   border-radius: 3px;
   border: 1px solid var(--line);
   margin-left: 8px;
+}
+
+.legend-box.good {
+  background: var(--good-bg);
 }
 
 .legend-box.warn {
@@ -751,31 +762,11 @@ table.grid td.level-veteran {
   flex-wrap: wrap;
 }
 
-/* ---------- 定員・多すぎる日・原因ごとの色 ---------- */
-:root {
-  --over-bg: #d7e6fb; /* 定員より多い日 */
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --over-bg: #1f3553;
-  }
-}
-
-table.grid th.over,
-table.grid tfoot td.over {
-  background: var(--over-bg);
-}
-
 /* 表の下の「3/5」の「/5」（目標の人数）は小さく */
 table.grid tfoot .target {
   font-size: 0.65rem;
   color: var(--muted);
   font-weight: 400;
-}
-
-.legend-box.over {
-  background: var(--over-bg);
 }
 
 /* 定員の入力欄（月〜日・祝） */
@@ -832,10 +823,6 @@ table.grid tfoot .target {
 
 .issue-chip.ng {
   background: var(--ng-bg);
-}
-
-.issue-chip.over {
-  background: var(--over-bg);
 }
 
 /* =========================================================
