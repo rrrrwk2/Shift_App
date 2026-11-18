@@ -315,7 +315,7 @@ function renderShift(data) {
     : "<li>この月のシフトはありません。</li>";
 
   // ---- みんなのシフト（名前 × 日付の表。横にスクロール） ----
-  //   どの日の列も同じ幅。マスには始まりの時間だけ書く（終わりの時間は「自分のシフト」で見られる）
+  //   どの日の列も同じ幅。マスの真ん中に始まりの時間。終わりの時間がある日だけ、下にうっすら小さく書く
   //   今日の日付は色を変えて、開いたときに今日の列までスクロールする
   const dates = Array.from({ length: daysInMonth(period) }, (_, i) => toDate(period, i + 1));
   const byKey = new Map(data.assignments.map((a) => [`${a.staff_id}|${a.date}`, a]));
@@ -336,8 +336,10 @@ function renderShift(data) {
     for (const d of dates) {
       const a = byKey.get(`${person.id}|${d}`);
       const todayCls = d === today ? " today" : "";
+      // 終わりの時間がある日（ラストまでではない日）だけ、下にうっすら小さく「〜15」と書く
+      const end = a?.end_time ? `<span class="v-end">〜${escapeHtml(shortTime(a.end_time))}</span>` : "";
       html += a
-        ? `<td class="on${todayCls}">${escapeHtml(shortTime(a.start_time))}</td>`
+        ? `<td class="on${todayCls}">${escapeHtml(shortTime(a.start_time))}${end}</td>`
         : `<td class="${todayCls.trim()}"></td>`;
     }
     html += "</tr>";

@@ -1075,8 +1075,21 @@ table.month-grid td {
 }
 
 table.month-grid td.on {
+  position: relative; /* 終わりの時間を、マスの下のはしに置くため */
   font-size: 0.9rem;
   font-weight: 700;
+}
+
+/* 終わりの時間（ラスト以外の日だけ）：始まりの時間は真ん中のまま、下のはしにうっすら小さく */
+table.month-grid .v-end {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 1px;
+  font-size: 0.55rem;
+  font-weight: 400;
+  line-height: 1;
+  opacity: 0.45;
 }
 
 /* 今日の日付 */
