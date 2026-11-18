@@ -1430,6 +1430,11 @@ table.grid .pinned-last {
   color: #c62828;
 }
 
+/* 女性の名前は赤 */
+.print-sheet .p-female {
+  color: #c62828;
+}
+
 .print-sheet .p-closed {
   background: #dcdcdc;
 }
@@ -1457,12 +1462,6 @@ table.grid .pinned-last {
 
 .print-sheet tr {
   page-break-inside: avoid;
-}
-
-.print-sheet .p-note {
-  margin: 1.5mm 0 0;
-  font-size: 7pt;
-  color: #444;
 }
 
 @media print {

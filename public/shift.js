@@ -525,17 +525,9 @@ async function onDownloadPdf() {
 }
 
 function renderPrintSheet() {
-  const { period, staff, rules, shifts, schedule } = state;
+  const { period, staff, rules, shifts } = state;
   const dates = Array.from({ length: daysInMonth(period) }, (_, i) => toDate(period, i + 1));
   const closed = new Set(dates.filter((d) => isClosedDay(d, rules)));
-
-  // 公開した内容と同じかどうか
-  let status = "下書き（まだ公開していません）";
-  if (schedule.published_at) {
-    status = schedule.changed_since_publish
-      ? "下書き（公開したあとに変更あり）"
-      : `公開済み（${formatUpdated(schedule.published_at)}）`;
-  }
   const now = new Date();
   const printed = `${now.getFullYear()}/${now.getMonth() + 1}/${now.getDate()}`;
 
@@ -549,7 +541,8 @@ function renderPrintSheet() {
   }
   head += "<th class='p-total'>日数</th></tr></thead>";
 
-  // 1人1行：入っている日は「17」「〜L」のように時間を2段で書く
+  // 1人1行：入っている日は開始の時間を書く。終わりの時間がある日だけ、下に「〜22」と書く
+  //   （終わりが空欄＝ラストまでの日は、開始の時間だけ）
   const perDay = Object.fromEntries(dates.map((d) => [d, 0]));
   let body = "<tbody>";
   for (const person of staff) {
@@ -563,13 +556,13 @@ function renderPrintSheet() {
       }
       days++;
       perDay[date]++;
-      const start = shortTime(shift.start_time) || "?";
-      const end = shift.end_time ? shortTime(shift.end_time) : "L";
-      cells += `<td class="p-on"><span class="p-start">${escapeHtml(start)}</span><span class="p-end">〜${escapeHtml(
-        end
-      )}</span></td>`;
+      const start = `<span class="p-start">${escapeHtml(shortTime(shift.start_time))}</span>`;
+      const end = shift.end_time ? `<span class="p-end">〜${escapeHtml(shortTime(shift.end_time))}</span>` : "";
+      cells += `<td class="p-on">${start}${end}</td>`;
     }
-    body += `<tr><td class="p-name">${escapeHtml(person.name)}</td>${cells}<td class="p-total">${days}</td></tr>`;
+    // 女性は名前を赤、男性（と未設定の人）は黒
+    const nameCls = person.gender === "female" ? "p-name p-female" : "p-name";
+    body += `<tr><td class="${nameCls}">${escapeHtml(person.name)}</td>${cells}<td class="p-total">${days}</td></tr>`;
   }
   body += "</tbody>";
 
@@ -581,10 +574,9 @@ function renderPrintSheet() {
   els.printSheet.innerHTML = `
     <div class="p-header">
       <h1>${escapeHtml(formatPeriod(period))} シフト表</h1>
-      <div class="p-meta">${escapeHtml(status)}　印刷：${printed}</div>
+      <div class="p-meta">印刷：${printed}</div>
     </div>
-    <table class="p-table">${head}${body}${foot}</table>
-    <p class="p-note">時間は「開始〜終わり」。L＝ラストまで。</p>`;
+    <table class="p-table">${head}${body}${foot}</table>`;
 }
 
 // 削った日（○なのに入れていない日）を表示する（備考と同じ小さい画面を使う）
