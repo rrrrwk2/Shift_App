@@ -15,6 +15,8 @@ const els = {
   generateButton: $("generate-button"),
   notifyCheck: $("notify-check"),
   publishButton: $("publish-button"),
+  printButton: $("print-button"),
+  printSheet: $("print-sheet"),
   actionMessage: $("action-message"),
   grid: $("shift-grid"),
   issuesCard: $("issues-card"),
@@ -55,6 +57,7 @@ async function init() {
   els.reloadButton.addEventListener("click", load);
   els.generateButton.addEventListener("click", onGenerate);
   els.publishButton.addEventListener("click", onPublish);
+  els.printButton.addEventListener("click", onPrint);
   // 表のマスをタップしたとき（マス1つ1つではなく、表全体で受け取る）
   els.grid.addEventListener("click", (e) => {
     const noteButton = e.target.closest("[data-note-staff]");
@@ -457,6 +460,80 @@ window.addEventListener("resize", () => {
   clearTimeout(pinLeftColumns.timer);
   pinLeftColumns.timer = setTimeout(pinLeftColumns, 200);
 });
+
+// ---------------------------------------------------------
+// 印刷・PDF（A4横の1枚にシフト表をまとめる）
+//   印刷用の表を作ってから、ブラウザの印刷を開く。
+//   印刷の画面で「PDFに保存」を選べばPDFになる
+// ---------------------------------------------------------
+function onPrint() {
+  if (!state) return;
+  renderPrintSheet();
+  window.print();
+}
+
+function renderPrintSheet() {
+  const { period, staff, rules, shifts, schedule } = state;
+  const dates = Array.from({ length: daysInMonth(period) }, (_, i) => toDate(period, i + 1));
+  const closed = new Set(dates.filter((d) => isClosedDay(d, rules)));
+
+  // 公開した内容と同じかどうか
+  let status = "下書き（まだ公開していません）";
+  if (schedule.published_at) {
+    status = schedule.changed_since_publish
+      ? "下書き（公開したあとに変更あり）"
+      : `公開済み（${formatUpdated(schedule.published_at)}）`;
+  }
+  const now = new Date();
+  const printed = `${now.getFullYear()}/${now.getMonth() + 1}/${now.getDate()}`;
+
+  // 見出し：日付と曜日（土曜は青、日曜・祝日は赤、定休日はグレー）
+  let head = "<thead><tr><th class='p-name'>名前</th>";
+  for (const date of dates) {
+    const wd = weekdayOf(date);
+    const holiday = isHoliday(date);
+    const cls = [closed.has(date) ? "p-closed" : "", wd === 0 || holiday ? "p-sun" : wd === 6 ? "p-sat" : ""].join(" ");
+    head += `<th class="${cls}">${Number(date.slice(-2))}<br>${closed.has(date) ? "休" : holiday ? "祝" : WEEKDAYS[wd]}</th>`;
+  }
+  head += "<th class='p-total'>日数</th></tr></thead>";
+
+  // 1人1行：入っている日は「17」「〜L」のように時間を2段で書く
+  const perDay = Object.fromEntries(dates.map((d) => [d, 0]));
+  let body = "<tbody>";
+  for (const person of staff) {
+    let days = 0;
+    let cells = "";
+    for (const date of dates) {
+      const shift = shifts.get(keyOf(person.id, date));
+      if (!shift) {
+        cells += `<td class="${closed.has(date) ? "p-closed" : ""}"></td>`;
+        continue;
+      }
+      days++;
+      perDay[date]++;
+      const start = shortTime(shift.start_time) || "?";
+      const end = shift.end_time ? shortTime(shift.end_time) : "L";
+      cells += `<td class="p-on"><span class="p-start">${escapeHtml(start)}</span><span class="p-end">〜${escapeHtml(
+        end
+      )}</span></td>`;
+    }
+    body += `<tr><td class="p-name">${escapeHtml(person.name)}</td>${cells}<td class="p-total">${days}</td></tr>`;
+  }
+  body += "</tbody>";
+
+  // いちばん下：その日に入る人数
+  let foot = "<tfoot><tr><td class='p-name'>人数</td>";
+  for (const date of dates) foot += `<td class="${closed.has(date) ? "p-closed" : ""}">${perDay[date] || ""}</td>`;
+  foot += "<td class='p-total'></td></tr></tfoot>";
+
+  els.printSheet.innerHTML = `
+    <div class="p-header">
+      <h1>${escapeHtml(formatPeriod(period))} シフト表</h1>
+      <div class="p-meta">${escapeHtml(status)}　印刷：${printed}</div>
+    </div>
+    <table class="p-table">${head}${body}${foot}</table>
+    <p class="p-note">時間は「開始〜終わり」。L＝ラストまで。</p>`;
+}
 
 // 削った日（○なのに入れていない日）を表示する（備考と同じ小さい画面を使う）
 function showCut(staffId) {

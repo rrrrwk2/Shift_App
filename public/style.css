@@ -1346,3 +1346,134 @@ table.grid .pinned {
 table.grid .pinned-last {
   box-shadow: inset -2px 0 0 var(--line);
 }
+
+/* ---------- 印刷・PDF（シフト作成画面の「印刷・PDF」ボタン） ---------- */
+/* 画面では出さない。印刷のときだけ、この表だけを A4 横に出す */
+.print-sheet {
+  display: none;
+}
+
+@media print {
+  @page {
+    size: A4 landscape;
+    margin: 8mm;
+  }
+
+  body > *:not(.print-sheet) {
+    display: none !important;
+  }
+
+  body {
+    margin: 0;
+    padding: 0;
+    background: #fff;
+    color: #000;
+  }
+
+  .print-sheet {
+    display: block;
+    font-size: 7.5pt;
+    /* 背景の色も印刷する（入っている日・定休日の色） */
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .print-sheet .p-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 2mm;
+  }
+
+  .print-sheet h1 {
+    margin: 0;
+    font-size: 14pt;
+  }
+
+  .print-sheet .p-meta {
+    font-size: 8pt;
+    color: #444;
+  }
+
+  .print-sheet .p-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+  }
+
+  .print-sheet th,
+  .print-sheet td {
+    border: 0.3mm solid #888;
+    padding: 0.4mm 0;
+    text-align: center;
+    vertical-align: middle;
+    line-height: 1.15;
+    overflow: hidden;
+  }
+
+  .print-sheet thead th {
+    font-size: 7pt;
+    background: #f2f2f2;
+  }
+
+  .print-sheet tbody td {
+    height: 8.5mm;
+  }
+
+  .print-sheet .p-name {
+    width: 22mm;
+    padding: 0 1.2mm;
+    text-align: left;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    font-size: 8pt;
+  }
+
+  .print-sheet .p-total {
+    width: 8mm;
+    font-weight: 700;
+  }
+
+  .print-sheet .p-sat {
+    color: #1a56c4;
+  }
+
+  .print-sheet .p-sun {
+    color: #c62828;
+  }
+
+  .print-sheet .p-closed {
+    background: #dcdcdc;
+  }
+
+  .print-sheet td.p-on {
+    background: #e3f1e7;
+  }
+
+  .print-sheet .p-start {
+    display: block;
+    font-weight: 700;
+    font-size: 7.5pt;
+  }
+
+  .print-sheet .p-end {
+    display: block;
+    font-size: 6pt;
+    color: #333;
+  }
+
+  .print-sheet tfoot td {
+    font-weight: 700;
+    background: #f2f2f2;
+  }
+
+  .print-sheet tr {
+    page-break-inside: avoid;
+  }
+
+  .print-sheet .p-note {
+    margin: 1.5mm 0 0;
+    font-size: 7pt;
+    color: #444;
+  }
+}

@@ -33,6 +33,7 @@
 
           <div class="shift-actions">
             <button id="generate-button" type="button">希望から下書きを作成</button>
+            <button id="print-button" type="button">印刷・PDF（A4）</button>
             <span class="spacer"></span>
             <label class="check-row">
               <input id="notify-check" type="checkbox" checked />
@@ -91,6 +92,9 @@
         <button id="note-close" type="button">閉じる</button>
       </div>
     </dialog>
+
+    <!-- 印刷用のシフト表（画面には出さず、印刷・PDFのときだけ使う。中身は shift.js が作る） -->
+    <section id="print-sheet" class="print-sheet" aria-hidden="true"></section>
 
     <!-- LINEでのログインに使うLINEの部品 -->
     <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
