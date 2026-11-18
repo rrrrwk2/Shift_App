@@ -207,10 +207,16 @@
           </section>
           <section class="card" id="all-shift-card">
             <h2>全体のシフト</h2>
-            <p class="hint">横にスクロールできます。</p>
-            <div class="table-wrap">
-              <table id="all-shift-table" class="grid view-grid"></table>
+            <!-- 1週間ずつ表示する（スマホの幅に収まるように） -->
+            <div class="week-nav">
+              <button id="week-prev" type="button" aria-label="前の週">◀</button>
+              <span id="week-label"></span>
+              <button id="week-next" type="button" aria-label="次の週">▶</button>
             </div>
+            <div class="table-wrap">
+              <table id="all-shift-table" class="grid view-grid week-grid"></table>
+            </div>
+            <p class="hint" style="margin-top: 8px">大きい数字が始まりの時間、下の小さい数字が終わりの時間（書いていない日はラストまで）。</p>
           </section>
         </section>
 

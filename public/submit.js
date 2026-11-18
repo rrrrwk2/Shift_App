@@ -69,6 +69,9 @@ const els = {
   myShiftList: $("my-shift-list"),
   allShiftCard: $("all-shift-card"),
   allShiftTable: $("all-shift-table"),
+  weekPrev: $("week-prev"),
+  weekNext: $("week-next"),
+  weekLabel: $("week-label"),
 };
 
 // 画面の状態
@@ -92,6 +95,8 @@ async function init() {
   els.periodSelect.addEventListener("change", onPeriodChanged);
   els.tabSubmit.addEventListener("click", () => switchTab("submit"));
   els.tabShift.addEventListener("click", () => switchTab("shift"));
+  els.weekPrev.addEventListener("click", () => moveWeek(-1));
+  els.weekNext.addEventListener("click", () => moveWeek(1));
   els.defaultStart.addEventListener("input", renderDayList);
   els.defaultEnd.addEventListener("input", renderDayList);
   els.formView.addEventListener("submit", onSubmit);
@@ -305,34 +310,89 @@ function renderShift(data) {
         .join("")
     : "<li>この月のシフトはありません。</li>";
 
-  // ---- みんなのシフト（名前 × 日付の表） ----
-  const dates = Array.from({ length: daysInMonth(period) }, (_, i) => toDate(period, i + 1));
+  // ---- みんなのシフト（1週間ずつ） ----
+  // 最初に出す週：今日がこの月なら今日の週、そうでなければ月のはじめの週
+  const today = toDate(todayPeriod(), new Date().getDate());
+  const weeks = weeksOfMonth(period);
+  const todayWeek = weeks.findIndex((w) => w.includes(today));
+  shiftWeek = { data, period, weeks, index: Math.max(todayWeek, 0) };
+  renderWeek();
+}
+
+// 表示中の公開シフトと、何週目を見ているか
+let shiftWeek = null;
+
+// "2026-12-05" の n 日後の日付
+function addDays(date, n) {
+  const d = new Date(`${date}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+// 今月（"2026-11" の形。スマホの時計で見る）
+function todayPeriod() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+}
+
+// その月を、日曜はじまりの1週間ずつに分ける（前後の月の日も入る。7日 × 週の数）
+function weeksOfMonth(period) {
+  const first = toDate(period, 1);
+  let start = addDays(first, -weekdayOf(first));
+  const weeks = [];
+  while (start <= toDate(period, daysInMonth(period))) {
+    weeks.push(Array.from({ length: 7 }, (_, i) => addDays(start, i)));
+    start = addDays(start, 7);
+  }
+  return weeks;
+}
+
+// 1週間分の表（名前 × 7日）。マスの大きさはどの日も同じ
+function renderWeek() {
+  const { data, period, weeks, index } = shiftWeek;
+  const days = weeks[index];
+  const inMonth = (d) => d.startsWith(period);
+  const monthDates = Array.from({ length: daysInMonth(period) }, (_, i) => toDate(period, i + 1));
   const byKey = new Map(data.assignments.map((a) => [`${a.staff_id}|${a.date}`, a]));
-  const short = (t) => (t ? t.replace(/:00$/, "") : "");
+
+  // 週の切りかえ
+  const shown = days.filter(inMonth);
+  els.weekLabel.textContent = `${formatDate(shown[0])} 〜 ${formatDate(shown[shown.length - 1])}`;
+  els.weekPrev.disabled = index === 0;
+  els.weekNext.disabled = index === weeks.length - 1;
 
   let html = "<thead><tr><th class='name'>名前</th>";
-  for (const d of dates) {
+  for (const d of days) {
     const wd = weekdayOf(d);
     const holiday = isHoliday(d);
-    html += `<th class="${wd === 0 || holiday ? "sun" : wd === 6 ? "sat" : ""}">${Number(d.slice(-2))}<br>${
-      holiday ? "祝" : WEEKDAYS[wd]
-    }</th>`;
+    const cls = !inMonth(d) ? "out" : wd === 0 || holiday ? "sun" : wd === 6 ? "sat" : "";
+    html += `<th class="${cls}">${Number(d.slice(-2))}<br>${holiday ? "祝" : WEEKDAYS[wd]}</th>`;
   }
   html += "</tr></thead><tbody>";
   for (const person of data.staff) {
-    // シフトが1日もない人は表に出さない
-    if (!dates.some((d) => byKey.has(`${person.id}|${d}`))) continue;
+    // この月にシフトが1日もない人は出さない（週ごとに人が増えたり減ったりしないよう、月で決める）
+    if (!monthDates.some((d) => byKey.has(`${person.id}|${d}`))) continue;
     html += `<tr class="${person.id === data.me ? "me-row" : ""}"><td class="name">${escapeHtml(person.name)}</td>`;
-    for (const d of dates) {
-      const a = byKey.get(`${person.id}|${d}`);
-      html += a
-        ? `<td class="on">${escapeHtml(short(a.start_time) || "?")}-${escapeHtml(a.end_time ? short(a.end_time) : "L")}</td>`
-        : "<td></td>";
+    for (const d of days) {
+      const a = inMonth(d) ? byKey.get(`${person.id}|${d}`) : null;
+      if (!a) {
+        html += `<td class="${inMonth(d) ? "" : "out"}"></td>`;
+        continue;
+      }
+      // 始まりの時間を大きく。終わりの時間がある日だけ、下に小さく書く
+      const end = a.end_time ? `<span class="v-end">〜${escapeHtml(shortTime(a.end_time))}</span>` : "";
+      html += `<td class="on"><span class="v-start">${escapeHtml(shortTime(a.start_time))}</span>${end}</td>`;
     }
     html += "</tr>";
   }
   html += "</tbody>";
   els.allShiftTable.innerHTML = html;
+}
+
+function moveWeek(step) {
+  if (!shiftWeek) return;
+  shiftWeek.index = Math.min(Math.max(shiftWeek.index + step, 0), shiftWeek.weeks.length - 1);
+  renderWeek();
 }
 
 // サーバーから最新の状況を読み込んで、表示を決め直す

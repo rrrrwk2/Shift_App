@@ -1048,6 +1048,84 @@ table.view-grid tr.me-row td.on {
   color: var(--accent-text);
 }
 
+/* ---- スタッフの「全体のシフト」：1週間ずつ、どのマスも同じ大きさ ---- */
+.week-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.week-nav button {
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 44px;
+  padding: 6px 12px;
+}
+
+.week-nav button:disabled {
+  opacity: 0.35;
+}
+
+#week-label {
+  font-weight: 700;
+  font-size: 0.95rem;
+}
+
+table.week-grid {
+  width: 100%;
+  table-layout: fixed; /* 中身の長さに関係なく、日付の列はみんな同じ幅 */
+}
+
+table.week-grid th.name,
+table.week-grid td.name {
+  width: 4.4em;
+  max-width: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: left;
+}
+
+table.week-grid td {
+  height: 46px;
+  padding: 2px 0;
+  vertical-align: middle;
+  overflow: hidden;
+}
+
+table.week-grid td.on {
+  font-size: inherit;
+}
+
+table.week-grid .v-start {
+  display: block;
+  font-size: 0.85rem;
+  letter-spacing: -0.02em;
+  font-weight: 700;
+  line-height: 18px;
+}
+
+table.week-grid .v-end {
+  display: block;
+  font-size: 0.62rem;
+  letter-spacing: -0.03em;
+  font-weight: 500;
+  line-height: 14px;
+  opacity: 0.85;
+}
+
+/* 前の月・次の月の日（この月のシフトではない） */
+table.week-grid th.out {
+  color: var(--muted);
+  font-weight: 400;
+  opacity: 0.5;
+}
+
+table.week-grid td.out {
+  background: var(--closed-bg);
+}
+
 /* =========================================================
    ログイン・招待コード
    ========================================================= */
