@@ -1048,6 +1048,22 @@ table.view-grid tr.me-row td.on {
   color: var(--accent-text);
 }
 
+/* ---- スタッフの「シフトを見る」の見出し：「全体のシフト（12月）　12/3 18:40 更新」 ---- */
+.shift-title {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  row-gap: 2px;
+}
+
+.shift-title .shift-updated {
+  margin-left: auto;
+  padding-left: 8px;
+  font-size: 0.75rem;
+  font-weight: 400;
+  color: var(--muted);
+}
+
 /* ---- スタッフの「全体のシフト」：どの日の列も同じ幅・同じ高さ（横にスクロール） ---- */
 table.month-grid {
   table-layout: fixed;

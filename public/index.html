@@ -200,13 +200,12 @@
 
         <!-- ===== 公開されたシフトを見る画面 ===== -->
         <section id="shift-view" hidden>
-          <p id="shift-meta" class="hint"></p>
           <section class="card">
-            <h2>自分のシフト</h2>
+            <h2 class="shift-title">自分のシフト<span class="shift-month"></span></h2>
             <ul id="my-shift-list" class="summary-days"></ul>
           </section>
           <section class="card" id="all-shift-card">
-            <h2>全体のシフト</h2>
+            <h2 class="shift-title">全体のシフト<span class="shift-month"></span><span id="shift-updated" class="shift-updated"></span></h2>
             <div class="table-wrap">
               <table id="all-shift-table" class="grid view-grid month-grid"></table>
             </div>

@@ -65,7 +65,8 @@ const els = {
   tabSubmit: $("tab-submit"),
   tabShift: $("tab-shift"),
   shiftView: $("shift-view"),
-  shiftMeta: $("shift-meta"),
+  shiftMonths: document.querySelectorAll(".shift-month"),
+  shiftUpdated: $("shift-updated"),
   myShiftList: $("my-shift-list"),
   allShiftCard: $("all-shift-card"),
   allShiftTable: $("all-shift-table"),
@@ -292,13 +293,15 @@ async function loadShift() {
 
 function renderShift(data) {
   const period = els.periodSelect.value;
+  for (const el of els.shiftMonths) el.textContent = `（${Number(period.slice(5))}月）`;
   if (!data.published) {
-    els.shiftMeta.textContent = "";
+    els.shiftUpdated.textContent = "";
     els.myShiftList.innerHTML = `<li>${formatPeriod(period)}のシフトはまだ公開されていません。</li>`;
     els.allShiftCard.hidden = true;
     return;
   }
-  els.shiftMeta.textContent = `${formatUpdated(data.published_at)} に公開されたシフトです。`;
+  // 見出しに「（12月）」と、いつ公開（更新）されたか
+  els.shiftUpdated.textContent = `${formatUpdated(data.published_at)} 更新`;
   els.allShiftCard.hidden = false;
 
   // ---- あなたのシフト ----
