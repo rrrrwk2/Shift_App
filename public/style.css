@@ -1048,82 +1048,45 @@ table.view-grid tr.me-row td.on {
   color: var(--accent-text);
 }
 
-/* ---- スタッフの「全体のシフト」：1週間ずつ、どのマスも同じ大きさ ---- */
-.week-nav {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 8px;
+/* ---- スタッフの「全体のシフト」：どの日の列も同じ幅・同じ高さ（横にスクロール） ---- */
+table.month-grid {
+  table-layout: fixed;
+  width: max-content;
 }
 
-.week-nav button {
-  flex: 0 0 auto;
-  width: auto;
+table.month-grid th:not(.name),
+table.month-grid td:not(.name) {
+  width: 44px;
   min-width: 44px;
-  padding: 6px 12px;
+  max-width: 44px;
 }
 
-.week-nav button:disabled {
-  opacity: 0.35;
-}
-
-#week-label {
-  font-weight: 700;
-  font-size: 0.95rem;
-}
-
-table.week-grid {
-  width: 100%;
-  table-layout: fixed; /* 中身の長さに関係なく、日付の列はみんな同じ幅 */
-}
-
-table.week-grid th.name,
-table.week-grid td.name {
-  width: 4.4em;
-  max-width: none;
+table.month-grid th.name,
+table.month-grid td.name {
+  width: 4.6em;
+  max-width: 4.6em;
   overflow: hidden;
   text-overflow: ellipsis;
-  text-align: left;
 }
 
-table.week-grid td {
-  height: 46px;
-  padding: 2px 0;
-  vertical-align: middle;
-  overflow: hidden;
+table.month-grid td {
+  height: 40px;
+  padding: 0;
 }
 
-table.week-grid td.on {
-  font-size: inherit;
-}
-
-table.week-grid .v-start {
-  display: block;
-  font-size: 0.85rem;
-  letter-spacing: -0.02em;
+table.month-grid td.on {
+  font-size: 0.9rem;
   font-weight: 700;
-  line-height: 18px;
 }
 
-table.week-grid .v-end {
-  display: block;
-  font-size: 0.62rem;
-  letter-spacing: -0.03em;
-  font-weight: 500;
-  line-height: 14px;
-  opacity: 0.85;
+/* 今日の日付 */
+table.month-grid th.today {
+  background: var(--accent);
+  color: var(--accent-text);
 }
 
-/* 前の月・次の月の日（この月のシフトではない） */
-table.week-grid th.out {
-  color: var(--muted);
-  font-weight: 400;
-  opacity: 0.5;
-}
-
-table.week-grid td.out {
-  background: var(--closed-bg);
+table.month-grid td.today {
+  box-shadow: inset 2px 0 0 var(--accent), inset -2px 0 0 var(--accent);
 }
 
 /* =========================================================

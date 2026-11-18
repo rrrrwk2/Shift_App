@@ -69,9 +69,6 @@ const els = {
   myShiftList: $("my-shift-list"),
   allShiftCard: $("all-shift-card"),
   allShiftTable: $("all-shift-table"),
-  weekPrev: $("week-prev"),
-  weekNext: $("week-next"),
-  weekLabel: $("week-label"),
 };
 
 // 画面の状態
@@ -95,8 +92,6 @@ async function init() {
   els.periodSelect.addEventListener("change", onPeriodChanged);
   els.tabSubmit.addEventListener("click", () => switchTab("submit"));
   els.tabShift.addEventListener("click", () => switchTab("shift"));
-  els.weekPrev.addEventListener("click", () => moveWeek(-1));
-  els.weekNext.addEventListener("click", () => moveWeek(1));
   els.defaultStart.addEventListener("input", renderDayList);
   els.defaultEnd.addEventListener("input", renderDayList);
   els.formView.addEventListener("submit", onSubmit);
@@ -160,12 +155,17 @@ async function loadMe() {
   const periodsData = await api("/api/periods");
   periodList = periodsData.periods;
   fillPeriodSelect(els.periodSelect, periodsData);
+  // タブごとに最初に出す月：希望を出す＝締切前の一番近い月、シフトを見る＝今月
+  defaultPeriod = { submit: periodsData.initial, shift: periodList[0].period };
 
   // LINEの「シフト公開」のお知らせのリンク（?view=shift&period=…）から開いたとき
   const params = new URLSearchParams(location.search);
   const wanted = params.get("period");
+  if (params.get("view") === "shift") {
+    setTab("shift");
+    els.periodSelect.value = defaultPeriod.shift;
+  }
   if (wanted && periodList.some((p) => p.period === wanted)) els.periodSelect.value = wanted;
-  if (params.get("view") === "shift") setTab("shift");
 
   els.bootSection.hidden = true;
   els.linkSection.hidden = true;
@@ -253,6 +253,7 @@ async function onPeriodChanged() {
 // 「希望を出す」と「シフトを見る」の切り替え
 // ---------------------------------------------------------
 let tab = "submit";
+let defaultPeriod = { submit: "", shift: "" };
 
 function setTab(name) {
   tab = name;
@@ -264,6 +265,8 @@ function setTab(name) {
 async function switchTab(name) {
   if (name === tab) return;
   setTab(name);
+  // タブを切りかえたら、そのタブで最初に出す月にする（シフトを見る＝今月）
+  if (defaultPeriod[name]) els.periodSelect.value = defaultPeriod[name];
   await onPeriodChanged();
 }
 
@@ -278,6 +281,7 @@ async function loadShift() {
     const data = await api(`/api/schedule?period=${els.periodSelect.value}`, { token: idToken });
     renderShift(data);
     els.shiftView.hidden = false;
+    scrollToToday(); // 表が見えるようになってから、今日の列までスクロールする
   } catch (err) {
     if (err instanceof AuthError) handleError(err);
     else showFlash(err.message, "error");
@@ -310,78 +314,31 @@ function renderShift(data) {
         .join("")
     : "<li>この月のシフトはありません。</li>";
 
-  // ---- みんなのシフト（1週間ずつ） ----
-  // 最初に出す週：今日がこの月なら今日の週、そうでなければ月のはじめの週
-  const today = toDate(todayPeriod(), new Date().getDate());
-  const weeks = weeksOfMonth(period);
-  const todayWeek = weeks.findIndex((w) => w.includes(today));
-  shiftWeek = { data, period, weeks, index: Math.max(todayWeek, 0) };
-  renderWeek();
-}
-
-// 表示中の公開シフトと、何週目を見ているか
-let shiftWeek = null;
-
-// "2026-12-05" の n 日後の日付
-function addDays(date, n) {
-  const d = new Date(`${date}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + n);
-  return d.toISOString().slice(0, 10);
-}
-
-// 今月（"2026-11" の形。スマホの時計で見る）
-function todayPeriod() {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-}
-
-// その月を、日曜はじまりの1週間ずつに分ける（前後の月の日も入る。7日 × 週の数）
-function weeksOfMonth(period) {
-  const first = toDate(period, 1);
-  let start = addDays(first, -weekdayOf(first));
-  const weeks = [];
-  while (start <= toDate(period, daysInMonth(period))) {
-    weeks.push(Array.from({ length: 7 }, (_, i) => addDays(start, i)));
-    start = addDays(start, 7);
-  }
-  return weeks;
-}
-
-// 1週間分の表（名前 × 7日）。マスの大きさはどの日も同じ
-function renderWeek() {
-  const { data, period, weeks, index } = shiftWeek;
-  const days = weeks[index];
-  const inMonth = (d) => d.startsWith(period);
-  const monthDates = Array.from({ length: daysInMonth(period) }, (_, i) => toDate(period, i + 1));
+  // ---- みんなのシフト（名前 × 日付の表。横にスクロール） ----
+  //   どの日の列も同じ幅。マスには始まりの時間だけ書く（終わりの時間は「自分のシフト」で見られる）
+  //   今日の日付は色を変えて、開いたときに今日の列までスクロールする
+  const dates = Array.from({ length: daysInMonth(period) }, (_, i) => toDate(period, i + 1));
   const byKey = new Map(data.assignments.map((a) => [`${a.staff_id}|${a.date}`, a]));
-
-  // 週の切りかえ
-  const shown = days.filter(inMonth);
-  els.weekLabel.textContent = `${formatDate(shown[0])} 〜 ${formatDate(shown[shown.length - 1])}`;
-  els.weekPrev.disabled = index === 0;
-  els.weekNext.disabled = index === weeks.length - 1;
+  const today = todayDate();
 
   let html = "<thead><tr><th class='name'>名前</th>";
-  for (const d of days) {
+  for (const d of dates) {
     const wd = weekdayOf(d);
     const holiday = isHoliday(d);
-    const cls = !inMonth(d) ? "out" : wd === 0 || holiday ? "sun" : wd === 6 ? "sat" : "";
+    const cls = [wd === 0 || holiday ? "sun" : wd === 6 ? "sat" : "", d === today ? "today" : ""].join(" ");
     html += `<th class="${cls}">${Number(d.slice(-2))}<br>${holiday ? "祝" : WEEKDAYS[wd]}</th>`;
   }
   html += "</tr></thead><tbody>";
   for (const person of data.staff) {
-    // この月にシフトが1日もない人は出さない（週ごとに人が増えたり減ったりしないよう、月で決める）
-    if (!monthDates.some((d) => byKey.has(`${person.id}|${d}`))) continue;
+    // シフトが1日もない人は表に出さない
+    if (!dates.some((d) => byKey.has(`${person.id}|${d}`))) continue;
     html += `<tr class="${person.id === data.me ? "me-row" : ""}"><td class="name">${escapeHtml(person.name)}</td>`;
-    for (const d of days) {
-      const a = inMonth(d) ? byKey.get(`${person.id}|${d}`) : null;
-      if (!a) {
-        html += `<td class="${inMonth(d) ? "" : "out"}"></td>`;
-        continue;
-      }
-      // 始まりの時間を大きく。終わりの時間がある日だけ、下に小さく書く
-      const end = a.end_time ? `<span class="v-end">〜${escapeHtml(shortTime(a.end_time))}</span>` : "";
-      html += `<td class="on"><span class="v-start">${escapeHtml(shortTime(a.start_time))}</span>${end}</td>`;
+    for (const d of dates) {
+      const a = byKey.get(`${person.id}|${d}`);
+      const todayCls = d === today ? " today" : "";
+      html += a
+        ? `<td class="on${todayCls}">${escapeHtml(shortTime(a.start_time))}</td>`
+        : `<td class="${todayCls.trim()}"></td>`;
     }
     html += "</tr>";
   }
@@ -389,10 +346,22 @@ function renderWeek() {
   els.allShiftTable.innerHTML = html;
 }
 
-function moveWeek(step) {
-  if (!shiftWeek) return;
-  shiftWeek.index = Math.min(Math.max(shiftWeek.index + step, 0), shiftWeek.weeks.length - 1);
-  renderWeek();
+// 今日の日付（"2026-12-05" の形。スマホの時計で見る）
+function todayDate() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+}
+
+// 今日の列が、名前のすぐ右に来るように横スクロールする（今日がその月でなければ何もしない）
+function scrollToToday() {
+  const wrap = els.allShiftTable.closest(".table-wrap");
+  const todayHead = els.allShiftTable.querySelector("th.today");
+  if (!todayHead) {
+    wrap.scrollLeft = 0;
+    return;
+  }
+  const nameWidth = els.allShiftTable.querySelector("th.name").offsetWidth;
+  wrap.scrollLeft = todayHead.offsetLeft - nameWidth;
 }
 
 // サーバーから最新の状況を読み込んで、表示を決め直す
