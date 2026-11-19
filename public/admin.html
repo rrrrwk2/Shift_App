@@ -29,7 +29,9 @@
             </div>
             <div id="summary" style="color: var(--muted)"></div>
             <button id="reload-button" type="button" style="flex: 0 0 auto">再読み込み</button>
+            <button id="wish-pdf-button" type="button" style="flex: 0 0 auto">希望のPDF</button>
           </div>
+          <div id="pdf-message" class="message error"></div>
         </section>
 
         <section id="remind-card" class="card">
@@ -187,6 +189,9 @@
       <div id="wish-message" class="message error"></div>
     </dialog>
 
+    <!-- PDF用の表（画面には出さず、PDFを作るときだけ使う。中身は sheet-pdf.js が作る） -->
+    <section id="print-sheet" class="print-sheet" aria-hidden="true"></section>
+
     <!-- ドラッグで並び替えるための部品（SortableJS 1.15.7, MITライセンス）。外部から読み込まず、このアプリに同梱している -->
     <script src="vendor/Sortable.min.js"></script>
     <!-- LINEでのログインに使うLINEの部品 -->
@@ -195,6 +200,7 @@
     <script src="rules.js"></script>
     <script src="admin-auth.js"></script>
     <script src="wish-editor.js"></script>
+    <script src="sheet-pdf.js"></script>
     <script src="admin.js"></script>
   </body>
 </html>

@@ -17,6 +17,7 @@ const els = {
   publishButton: $("publish-button"),
   printButton: $("print-button"),
   pdfButton: $("pdf-button"),
+  wishPdfButton: $("wish-pdf-button"),
   printSheet: $("print-sheet"),
   actionMessage: $("action-message"),
   grid: $("shift-grid"),
@@ -60,6 +61,7 @@ async function init() {
   els.publishButton.addEventListener("click", onPublish);
   els.printButton.addEventListener("click", onPrint);
   els.pdfButton.addEventListener("click", onDownloadPdf);
+  els.wishPdfButton.addEventListener("click", onDownloadWishPdf);
   // 表のマスをタップしたとき（マス1つ1つではなく、表全体で受け取る）
   els.grid.addEventListener("click", (e) => {
     const noteButton = e.target.closest("[data-note-staff]");
@@ -466,62 +468,45 @@ window.addEventListener("resize", () => {
 // ---------------------------------------------------------
 // 印刷・PDF（A4横の1枚にシフト表をまとめる）
 //   印刷    … 印刷用の表を作ってから、ブラウザの印刷を開く
-//   PDF     … 同じ表を画像にして、A4横のPDFファイルにしてダウンロードする
-//              （日本語のフォントをPDFに入れると重いので、画像にしてから貼る）
+//   PDF     … 同じ表を画像にして、A4横のPDFファイルにしてダウンロードする（sheet-pdf.js）
+//   希望のPDF … みんなの希望（○△と時間）の表をPDFにする
 // ---------------------------------------------------------
 function onPrint() {
   if (!state) return;
   renderPrintSheet();
+  document.body.classList.add("printing-sheet"); // 印刷のあいだだけ、表だけを出す
   window.print();
 }
 
-// PDFを作る部品（html2canvas・jsPDF）は大きいので、ボタンを押したときに初めて読み込む
-const PDF_LIBS = ["vendor/html2canvas.min.js", "vendor/jspdf.umd.min.js"];
+window.addEventListener("afterprint", () => document.body.classList.remove("printing-sheet"));
 
-function loadScript(src) {
-  return new Promise((resolve, reject) => {
-    const script = document.createElement("script");
-    script.src = src;
-    script.onload = resolve;
-    script.onerror = () => reject(new Error("PDFを作る部品を読み込めませんでした。通信を確認して、もう一度押してください"));
-    document.head.append(script);
-  });
+// シフト表のPDF（作り方は sheet-pdf.js）
+function onDownloadPdf() {
+  if (!state) return;
+  setMessage("");
+  return withPdfButton(
+    els.pdfButton,
+    async () => {
+      renderPrintSheet();
+      await downloadSheetPdf(els.printSheet, `シフト表_${formatPeriod(state.period)}.pdf`);
+    },
+    (message) => setMessage(message, "error")
+  );
 }
 
-async function onDownloadPdf() {
+// みんなの希望（○△と時間）のPDF
+function onDownloadWishPdf() {
   if (!state) return;
-  const label = els.pdfButton.textContent;
-  els.pdfButton.disabled = true;
-  els.pdfButton.textContent = "PDFを作成中…";
   setMessage("");
-  try {
-    for (const src of PDF_LIBS) {
-      if (!document.querySelector(`script[src="${src}"]`)) await loadScript(src);
-    }
-    renderPrintSheet();
-
-    // 表を画像にする（画面には出さず、裏でコピーした画面の中でだけ表を出して撮る）
-    const canvas = await window.html2canvas(els.printSheet, {
-      scale: 3, // 印刷してもにじまないように、細かめに撮る
-      backgroundColor: "#ffffff",
-      onclone: (doc) => doc.getElementById("print-sheet").classList.add("capturing"),
-    });
-
-    // A4横（297×210mm）。余白8mmの中に、縦横の比を変えずに収める
-    const pdf = new window.jspdf.jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
-    const margin = 8;
-    const maxW = 297 - margin * 2;
-    const maxH = 210 - margin * 2;
-    const ratio = Math.min(maxW / canvas.width, maxH / canvas.height);
-    // "FAST" … 画像を圧縮して入れる（入れないと16MBくらいの大きいファイルになる）
-    pdf.addImage(canvas, "PNG", margin, margin, canvas.width * ratio, canvas.height * ratio, undefined, "FAST");
-    pdf.save(`シフト表_${formatPeriod(state.period)}.pdf`);
-  } catch (err) {
-    setMessage(err.message || "PDFを作れませんでした", "error");
-  } finally {
-    els.pdfButton.disabled = false;
-    els.pdfButton.textContent = label;
-  }
+  return withPdfButton(
+    els.wishPdfButton,
+    async () => {
+      const { period, staff, subs, rules } = state;
+      renderWishSheet(els.printSheet, { period, staff, subs, rules });
+      await downloadSheetPdf(els.printSheet, `シフト希望_${formatPeriod(period)}.pdf`);
+    },
+    (message) => setMessage(message, "error")
+  );
 }
 
 function renderPrintSheet() {

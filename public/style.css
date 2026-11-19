@@ -1500,6 +1500,50 @@ table.grid .pinned-last {
   color: #c62828;
 }
 
+/* 希望のPDF：△の日（うすい黄色）、未提出、週の日数、備考 */
+.print-sheet td.p-maybe {
+  position: relative;
+  background: #fff3c4;
+}
+
+.print-sheet td.p-maybe .p-mark {
+  position: absolute;
+  top: 0.3mm;
+  left: 0.5mm;
+  font-size: 5pt;
+  line-height: 1;
+  color: #8a6d00;
+}
+
+.print-sheet td.p-unsubmitted {
+  color: #888;
+  text-align: left;
+  padding-left: 3mm;
+}
+
+.print-sheet .p-week {
+  width: 9mm;
+  font-size: 7pt;
+}
+
+.print-sheet .p-wish tbody td {
+  height: 7.5mm;
+}
+
+.print-sheet .p-notes {
+  margin: 2mm 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 7pt;
+  line-height: 1.35;
+}
+
+.print-sheet .p-notes li {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* 女性の名前は赤 */
 .print-sheet .p-female {
   color: #c62828;
@@ -1540,17 +1584,18 @@ table.grid .pinned-last {
     margin: 8mm;
   }
 
-  body > *:not(.print-sheet) {
+  /* 「シフトを印刷」を押したときだけ（body.printing-sheet）、表だけを印刷する */
+  body.printing-sheet > *:not(.print-sheet) {
     display: none !important;
   }
 
-  body {
+  body.printing-sheet {
     margin: 0;
     padding: 0;
     background: #fff;
   }
 
-  .print-sheet {
+  body.printing-sheet .print-sheet {
     display: block;
   }
 }

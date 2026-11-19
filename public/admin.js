@@ -31,6 +31,9 @@ const els = {
   ruleFemale: $("rule-female"),
   ruleClosed: $("rule-closed"),
   ruleDates: $("rule-dates"),
+  wishPdfButton: $("wish-pdf-button"),
+  pdfMessage: $("pdf-message"),
+  printSheet: $("print-sheet"),
   ruleDateAdd: $("rule-date-add"),
   rulesSave: $("rules-save"),
   rulesMessage: $("rules-message"),
@@ -61,6 +64,19 @@ async function init() {
   els.staffAdd.addEventListener("click", onAddStaff);
   els.remindButton.addEventListener("click", onRemindNow);
   els.rulesSave.addEventListener("click", onSaveRules);
+  els.wishPdfButton.addEventListener("click", () => {
+    if (!gridData) return;
+    els.pdfMessage.textContent = "";
+    const { period, staff, subs, rules } = gridData;
+    return withPdfButton(
+      els.wishPdfButton,
+      async () => {
+        renderWishSheet(els.printSheet, { period, staff, subs, rules });
+        await downloadSheetPdf(els.printSheet, `シフト希望_${formatPeriod(period)}.pdf`);
+      },
+      (message) => (els.pdfMessage.textContent = message)
+    );
+  });
   els.ruleDateAdd.addEventListener("click", () => {
     els.ruleDates.append(dateRuleRow("", {}));
     els.ruleDates.lastElementChild.querySelector("input[type=date]").focus();
