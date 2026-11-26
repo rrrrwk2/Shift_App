@@ -3,30 +3,13 @@
 // =========================================================
 
 // ---------------------------------------------------------
-// 合言葉の保存（ブラウザに覚えさせて、毎回入力しなくていいようにする）
+// 昔の版の後片付け：管理用の合言葉をブラウザに保存していた時期があったので、
+// 残っていたら消す（今はLINEでログインするので、合言葉はブラウザに保存しない）
 // ---------------------------------------------------------
-function loadKey(name) {
-  try {
-    return localStorage.getItem(name) || "";
-  } catch {
-    return "";
-  }
-}
-
-function saveKey(name, value) {
-  try {
-    localStorage.setItem(name, value);
-  } catch {
-    // 保存できない環境（プライベートモードなど）では、その場だけ使う
-  }
-}
-
-function clearKey(name) {
-  try {
-    localStorage.removeItem(name);
-  } catch {
-    // 何もしない
-  }
+try {
+  localStorage.removeItem("shiftapp.adminKey");
+} catch {
+  // 保存場所が使えない環境（プライベートモードなど）では何もしない
 }
 
 // ---------------------------------------------------------
@@ -34,11 +17,9 @@ function clearKey(name) {
 // ---------------------------------------------------------
 class AuthError extends Error {}
 
-// key   : 管理用の合言葉（一覧画面で使う）
-// token : LINEのIDトークン（提出画面で使う）
-async function api(path, { method = "GET", body, key, token } = {}) {
+// token : LINEのIDトークン
+async function api(path, { method = "GET", body, token } = {}) {
   const headers = {};
-  if (key) headers["X-Access-Key"] = key;
   if (token) headers["Authorization"] = `Bearer ${token}`;
   if (body) headers["Content-Type"] = "application/json";
 

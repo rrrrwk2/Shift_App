@@ -22,3 +22,10 @@
 /shift.html
   X-Frame-Options: DENY
   Cache-Control: no-store
+
+# スタッフの提出画面：知らないサイトに埋め込ませない（だまして「送信」を押させる攻撃の対策）
+# LINEのアプリから開くときに困らないよう、自分のサイトとLINE（*.line.me）だけは許可する
+/
+  Content-Security-Policy: frame-ancestors 'self' https://*.line.me
+/index.html
+  Content-Security-Policy: frame-ancestors 'self' https://*.line.me

@@ -662,6 +662,9 @@ async function onSubmit(event) {
     await refresh();
     els.doneTitle.textContent = "提出しました！";
     if (res.notified) showFlash("提出した内容の控えを、LINEのトークにも送りました。");
+    else if (res.receipt_limited) {
+      showFlash(`内容は保存しました。LINEへの控えは1か月${res.receipt_limit}回までなので、今回は送っていません。`);
+    }
     window.scrollTo({ top: 0, behavior: "smooth" });
   } catch (err) {
     if (err instanceof AuthError) {

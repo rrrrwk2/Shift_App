@@ -19,6 +19,15 @@ const LINE_VERIFY_URL = "https://api.line.me/oauth2/v2.1/verify";
 // LINEでメッセージを送るための窓口
 const LINE_API_BASE = "https://api.line.me";
 
+// 手元で試すとき（wrangler dev）だけ、LINEの窓口を自分のパソコンの偽物に差しかえられる。
+// 本番で間違って別のサイトが設定されても、本人確認やメッセージの合鍵がそこへ送られないよう、
+// 差しかえ先は 127.0.0.1 / localhost だけ受け付ける
+function lineEndpoint(override, fallback) {
+  return typeof override === "string" && /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?(\/|$)/.test(override)
+    ? override
+    : fallback;
+}
+
 // 締切の何日前にリマインドを送るか： 日数 → 記録に使う名前
 const REMINDER_DAYS = { 3: "3days", 1: "1day" };
 
@@ -189,7 +198,7 @@ async function verifyLineUser(request, env) {
   const match = auth.match(/^Bearer (.+)$/);
   if (!match) return null;
 
-  const res = await fetch(env.LINE_VERIFY_URL || LINE_VERIFY_URL, {
+  const res = await fetch(lineEndpoint(env.LINE_VERIFY_URL, LINE_VERIFY_URL), {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({ id_token: match[1], client_id: env.LINE_CHANNEL_ID }),
@@ -221,6 +230,7 @@ function safeEqual(a, b) {
 
 const STAFF_INVITE_DAYS = 7; // スタッフの招待コードの有効期限（日）
 const ADMIN_INVITE_HOURS = 24; // 管理者の招待コードの有効期限（時間）
+const RECEIPT_LIMIT_PER_PERIOD = 3; // 提出の控え（LINE）を送るのは、1人1か月この回数まで
 
 async function adminOf(env, lineUserId) {
   return env.DB.prepare("SELECT line_user_id, name FROM admins WHERE line_user_id = ?")
@@ -247,6 +257,10 @@ async function bootstrapAdmin(env, lineUser, body) {
   const limitKey = `bootstrap:${lineUser.sub}`;
   if (await isLocked(env, limitKey)) return tooManyFailures();
   if (!env.ADMIN_KEY) return json({ error: "サーバーに合言葉（ADMIN_KEY）が設定されていません" }, 503);
+  // すでに管理者がいるなら、合言葉を確かめる前に断る（合言葉が合っているかどうかを試せないように）
+  if (await env.DB.prepare("SELECT 1 FROM admins LIMIT 1").first()) {
+    return json({ error: "すでに管理者が登録されています。管理者から招待コードをもらってください" }, 409);
+  }
 
   const key = String(body?.key ?? "");
   if (!key || !safeEqual(key, env.ADMIN_KEY)) {
@@ -275,7 +289,10 @@ async function joinAdmin(env, lineUser, body) {
 
   const hash = await hashCode(body?.code);
   if (hash) {
-    const valid = `code_hash = ? AND kind = 'admin' AND used_at IS NULL AND expires_at > datetime('now')`;
+    // 発行した人が「今も管理者」であるコードだけ有効にする
+    // （外された管理者が、外される前に作っておいたコードで戻ってこられないように）
+    const valid = `code_hash = ? AND kind = 'admin' AND used_at IS NULL AND expires_at > datetime('now')
+                   AND created_by IN (SELECT line_user_id FROM admins)`;
     await env.DB.batch([
       env.DB.prepare(
         `INSERT OR IGNORE INTO admins (line_user_id, name, added_by)
@@ -314,9 +331,20 @@ async function createAdminInvite(env, admin) {
 
 async function removeAdmin(env, body) {
   const id = String(body?.line_user_id ?? "");
-  const { n } = await env.DB.prepare("SELECT COUNT(*) AS n FROM admins").first();
-  if (n <= 1) return json({ error: "最後の1人の管理者は削除できません" }, 400);
-  await env.DB.prepare("DELETE FROM admins WHERE line_user_id = ?").bind(id).run();
+  // 1つのまとまり（途中で止まらない）で、次の2つを行う
+  //  ・管理者を外す。「最後の1人ではない」の確認も同じ文の中で行う
+  //    （2人が同時にお互いを外しても、0人にならないように）
+  //  ・外した人が発行した、まだ使われていない招待コード（管理者用・スタッフ用）を消す
+  const [removed] = await env.DB.batch([
+    env.DB.prepare("DELETE FROM admins WHERE line_user_id = ? AND (SELECT COUNT(*) FROM admins) > 1").bind(id),
+    env.DB.prepare(
+      `DELETE FROM invites WHERE created_by = ? AND used_at IS NULL
+         AND NOT EXISTS (SELECT 1 FROM admins WHERE line_user_id = ?)`
+    ).bind(id, id),
+  ]);
+  if (removed.meta.changes !== 1) {
+    return json({ error: "最後の1人の管理者は削除できません（またはもう外れています）" }, 400);
+  }
   return json({ ok: true });
 }
 
@@ -405,9 +433,11 @@ async function linkMe(env, lineUser, body) {
   if (hash) {
     // 「使われていない・期限内」の招待コードに対応する、まだ誰とも結びついていない名前だけを結びつける
     // （2つの処理はまとめて実行されるので、同じコードを2人が同時に使っても1人にしか効かない）
+    // 発行した管理者が外されていたら、そのコードは使えない（管理者の招待コードと同じ決まり）
     const validInvite = `SELECT staff_id FROM invites
                           WHERE code_hash = ? AND kind = 'staff' AND used_at IS NULL
-                            AND expires_at > datetime('now')`;
+                            AND expires_at > datetime('now')
+                            AND created_by IN (SELECT line_user_id FROM admins)`;
     await env.DB.batch([
       env.DB.prepare(
         `UPDATE staff SET line_user_id = ?, line_name = ?, consented_at = datetime('now')
@@ -493,15 +523,26 @@ function periodInfo(period) {
 //   initial … スタッフの提出画面用：まだ締切前の一番近い月
 //   next    … 作成担当の画面用：来月（日本時間。11月に開いたら12月のシフトを作る）
 function listPeriods() {
-  const jstNow = new Date(Date.now() + 9 * 60 * 60 * 1000);
-  const periods = [];
-  for (let i = 0; i < 3; i++) {
-    const d = new Date(Date.UTC(jstNow.getUTCFullYear(), jstNow.getUTCMonth() + i, 1));
-    const period = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
-    periods.push(periodInfo(period));
-  }
+  const periods = offeredPeriods().map(periodInfo);
   const initial = (periods.find((p) => p.open) ?? periods[periods.length - 1]).period;
   return json({ periods, initial, next: periods[1].period });
+}
+
+// 選べる月（今月・来月・再来月。日本時間）。月の一覧と、スタッフが書きこめる月のチェックで共通に使う
+function offeredPeriods() {
+  const jstNow = new Date(Date.now() + 9 * 60 * 60 * 1000);
+  const result = [];
+  for (let i = 0; i < 3; i++) {
+    const d = new Date(Date.UTC(jstNow.getUTCFullYear(), jstNow.getUTCMonth() + i, 1));
+    result.push(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`);
+  }
+  return result;
+}
+
+// スタッフが書きこめるのは、画面で選べる月だけ（9999年12月のような遠い先の月は受け付けない。
+// そうしないと、申請の回数制限をすり抜けたり、消されないデータがたまったりする）
+function isOfferedPeriod(period) {
+  return offeredPeriods().includes(period);
 }
 
 // =========================================================
@@ -744,6 +785,7 @@ async function saveSubmission(env, me, body, lineUser) {
   // ---- 1. 送られてきた内容をチェックする ----
   const problem = validateSubmission(body) ?? (await closedDayProblem(env, body));
   if (problem) return json({ error: problem }, 400);
+  if (!isOfferedPeriod(body.period)) return json({ error: "月の指定が正しくありません" }, 400);
 
   // 締切を過ぎていたら受け付けない
   if (isClosed(body.period)) {
@@ -773,16 +815,42 @@ async function saveSubmission(env, me, body, lineUser) {
 
   // ---- 3. 提出したら、LINEで内容の控えを本人に送る ----
   // （送れなくても提出は済んでいるので、失敗してもエラーにはしない）
+  // 控えはLINEの「月200通まで」を使うので、1人1か月 RECEIPT_LIMIT_PER_PERIOD 回まで。
+  // それより多く送り直しても、内容は保存されるが控えは送らない（1人に送信枠を使い切られないように）
   let notified = false;
+  let receiptLimited = false;
   if (env.LINE_MESSAGING_TOKEN) {
-    try {
-      await sendLinePush(env, lineUser.sub, submissionReceiptText(me, body, isUpdate));
-      notified = true;
-    } catch (err) {
-      console.error("提出の控えを送れませんでした", err);
+    if (await claimReceiptSlot(env, me.id, body.period)) {
+      try {
+        await sendLinePush(env, lineUser.sub, submissionReceiptText(me, body, isUpdate));
+        notified = true;
+      } catch (err) {
+        console.error("提出の控えを送れませんでした", err);
+      }
+    } else {
+      receiptLimited = true;
     }
   }
-  return json({ ok: true, notified });
+  return json({ ok: true, notified, receipt_limited: receiptLimited, receipt_limit: RECEIPT_LIMIT_PER_PERIOD });
+}
+
+// 提出の控えを送ってよいか確かめて、送る回数を1つ数える（数える・確かめるを1つの文で行う）
+//   まだ上限に達していなければ true
+async function claimReceiptSlot(env, staffId, period) {
+  try {
+    const slot = await env.DB.prepare(
+      `UPDATE submissions SET receipts_sent = receipts_sent + 1
+        WHERE staff_id = ? AND period = ? AND receipts_sent < ?
+        RETURNING receipts_sent`
+    )
+      .bind(staffId, period, RECEIPT_LIMIT_PER_PERIOD)
+      .first();
+    return Boolean(slot);
+  } catch (err) {
+    // migrations/0012 をまだ実行していない（receipts_sent の列がない）ときは、今までどおり送る
+    console.error("控えの回数を数えられませんでした（0012のマイグレーションは実行済み？）", err);
+    return true;
+  }
 }
 
 // 希望を保存する（本人の提出と、管理者の代理入力で共通）
@@ -1364,7 +1432,7 @@ async function sendReminderMessage(env, userIds, period, daysLeft) {
 
 // 1人に文章を送る（プッシュメッセージ。無料プランの月の通数に数えられる）
 async function sendLinePush(env, userId, text) {
-  const res = await fetch(`${env.LINE_API_BASE || LINE_API_BASE}/v2/bot/message/push`, {
+  const res = await fetch(`${lineEndpoint(env.LINE_API_BASE, LINE_API_BASE)}/v2/bot/message/push`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -1379,7 +1447,7 @@ async function sendLinePush(env, userId, text) {
 // 管理者用：今月のLINEの送信数と上限（無料プランは月200通まで）
 async function getLineQuota(env) {
   if (!env.LINE_MESSAGING_TOKEN) return json({ ready: false });
-  const base = env.LINE_API_BASE || LINE_API_BASE;
+  const base = lineEndpoint(env.LINE_API_BASE, LINE_API_BASE);
   const headers = { Authorization: `Bearer ${env.LINE_MESSAGING_TOKEN}` };
   try {
     const [q, c] = await Promise.all([
@@ -1397,7 +1465,7 @@ async function getLineQuota(env) {
 async function sendLineText(env, userIds, text) {
   // LINEのマルチキャストは1回に500人まで
   for (let i = 0; i < userIds.length; i += 500) {
-    const res = await fetch(`${env.LINE_API_BASE || LINE_API_BASE}/v2/bot/message/multicast`, {
+    const res = await fetch(`${lineEndpoint(env.LINE_API_BASE, LINE_API_BASE)}/v2/bot/message/multicast`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -1424,7 +1492,8 @@ async function addChangeRequest(env, me, body) {
   const period = body?.period;
   const message = String(body?.message ?? "").trim();
 
-  if (!isPeriod(period)) return json({ error: "月の指定が正しくありません" }, 400);
+  // 選べる月（今月・来月・再来月）だけ。遠い先の月を指定して件数の上限をすり抜けられないように
+  if (!isPeriod(period) || !isOfferedPeriod(period)) return json({ error: "月の指定が正しくありません" }, 400);
   if (message.length < 1) return json({ error: "変更したい内容を書いてください" }, 400);
   if (message.length > 500) return json({ error: "申請は500文字以内にしてください" }, 400);
 
@@ -1487,7 +1556,8 @@ function validateSubmission(b) {
   for (const key of ["default_start", "default_end"]) {
     if (b[key] && !isTime(b[key])) return "時刻の形式が正しくありません";
   }
-  if (b.note != null && String(b.note).length > 500) {
+  if (b.note != null && typeof b.note !== "string") return "備考の形式が正しくありません";
+  if (b.note != null && b.note.length > 500) {
     return "備考は500文字以内にしてください";
   }
 
@@ -1508,7 +1578,8 @@ function validateSubmission(b) {
 }
 
 const isPeriod = (s) => typeof s === "string" && /^\d{4}-(0[1-9]|1[0-2])$/.test(s);
-const isDate = (s) => typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s);
+// 実在する日付だけ（12月99日のような日付は受け付けない）
+const isDate = (s) => isValidDate(s);
 const isTime = (s) => typeof s === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(s);
 
 function formatPeriodJa(period) {
